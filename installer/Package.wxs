@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="$(var.ProductName)" Manufacturer="Andre Louis" Version="$(var.Version)"
+           ProductCode="$(var.ProductCode)" UpgradeCode="$(var.UpgradeCode)" Language="1033"
+           Scope="$(var.Scope)" InstallerVersion="500" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Phonon SAPI is already installed."
+                  Schedule="afterInstallExecute" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Property Id="ARPCONTACT" Value="https://onj.me/contact" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/OnjLouis/phononSAPI" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/OnjLouis/phononSAPI/issues" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Property Id="REBOOT" Value="ReallySuppress" />
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="DisableShutdown" />
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" Sequence="execute" />
+    <Property Id="PhononRegistryRoot" Value="$(var.RegistryRoot)" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="PhononSAPI" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="PhononMenu" Name="$(var.ProductName)" />
+    </StandardDirectory>
+    <Binary Id="Prerequisites" SourceFile="$(var.Checker)" />
+    <CustomAction Id="CheckPhononUsage" BinaryRef="Prerequisites" DllEntry="CheckPhononUsage"
+                  Execute="immediate" Return="check" />
+    <CustomAction Id="CleanDownloadedInstaller" BinaryRef="Prerequisites" DllEntry="CleanDownloadedInstaller"
+                  Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="CheckPhononUsage" Before="InstallValidate" />
+      <Custom Action="CleanDownloadedInstaller" After="InstallFinalize" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+    <?if $(var.TestMode) = 1 ?>
+      <Property Id="PhononRegistryPrefix64" Value="$(var.RegistryPrefix64)" />
+      <Property Id="PhononRegistryPrefix32" Value="$(var.RegistryPrefix32)" />
+      <Property Id="PhononTestCacheRoot" Value="$(var.TestCacheRoot)" />
+      <CustomAction Id="FailIsolatedUpgrade" BinaryRef="Prerequisites" DllEntry="FailIsolatedUpgrade" Execute="deferred" Return="check" />
+      <InstallExecuteSequence>
+        <Custom Action="FailIsolatedUpgrade" After="InstallFiles" Condition="PHONON_TEST_FAIL=1" />
+      </InstallExecuteSequence>
+    <?endif?>
+    <Feature Id="Phonon" Title="Phonon SAPI" Level="1">
+      <ComponentGroupRef Id="Payload" />
+      <ComponentGroupRef Id="VoiceRegistration" />
+    </Feature>
+  </Package>
+</Wix>

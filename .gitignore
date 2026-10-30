@@ -1,0 +1,9 @@
+/build/
+/dist/
+/assets/
+/vendor/
+/vendor/sonic/sonic.c
+/vendor/sonic/sonic.h
+*.user
+*.log
+__pycache__/

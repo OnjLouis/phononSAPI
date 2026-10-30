@@ -1,0 +1,4 @@
+LIBRARY PhononSAPI
+EXPORTS
+    DllGetClassObject
+    DllCanUnloadNow
