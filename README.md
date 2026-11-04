@@ -7,6 +7,11 @@ server or first-use download required.
 
 ## Changelog
 
+### 1.0.1
+
+- Improved speech-generation efficiency on CPU and GPU without changing the model or voice data.
+- Kept frequently used voices ready while browsing larger voice selections, avoiding unnecessary delays when returning to them.
+
 ### 1.0.0
 
 First release, with multilingual voices, GPU acceleration, rate, pitch and volume

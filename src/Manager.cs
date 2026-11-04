@@ -19,8 +19,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Phonon SAPI")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
 
 namespace PhononSapi {
     public sealed class Voice {
@@ -48,7 +48,7 @@ namespace PhononSapi {
         public int Volume = 100;
     }
     public static class App {
-        public const string Version = "1.0.0";
+        public const string Version = "1.0.1";
         internal const string UpgradeCode = "{7688E43D-5355-50FC-AFF3-541E76F34049}";
         internal const string SoftwareUrl = "https://onj.me/software";
         internal const string DonationUrl = "https://onj.me/donate";

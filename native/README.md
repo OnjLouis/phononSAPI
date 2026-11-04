@@ -9,11 +9,16 @@ folder containing `sapiddk.h`; only that header is copied into the build tree,
 avoiding incompatible mixed Windows SDK/MinGW foundational headers.
 
 The host uses the same native Phonon ABI and payload as
-[Phonon for NVDA 1.0.1](https://github.com/OnjLouis/phononNVDA/tree/v1.0.1/native):
+[Phonon for NVDA](https://github.com/OnjLouis/phononNVDA/tree/main/native):
 Gradium `xn-ptts` v0.5.0, revision
 `e851445158f07061f063e3edff0080f9426c0da2`, with the supplied Windows/Vulkan
 patches applied before building. Those patches add Vulkan compute unit 3, bound
-the CPU pool and fix Vulkan initialization cleanup. The source and patches must
+the CPU pool and fix Vulkan initialization cleanup. Apply `ptts-performance.patch`
+after `ptts-windows.patch` for the merged upstream flow-conditioning and bounded
+voice-cache improvements ([PR 296](https://github.com/gradium-ai/xn-ptts/pull/296)
+and [PR 325](https://github.com/gradium-ai/xn-ptts/pull/325)). Credit to David Blum
+and Rudraksh Karpe for those changes. They preserve the existing ABI, model and
+sampling defaults. The source and patches must
 be retained when rebuilding the native DLL. The matching LLVM libunwind runtime
 is required beside `ptts_ffi.dll` under `runtime`.
 
