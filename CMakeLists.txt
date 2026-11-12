@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(PhononSAPI VERSION 1.0.3 LANGUAGES C CXX)
+project(PhononSAPI VERSION 1.0.4 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT WIN32)
@@ -50,6 +50,8 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   find_program(CSC csc PATHS "$ENV{WINDIR}/Microsoft.NET/Framework64/v4.0.30319" REQUIRED)
   file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/src/Manager.cs" MANAGER_SOURCE)
   file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/src/WindowsInstaller.cs" INSTALLER_SOURCE)
+  file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/src/RestartUpdate.cs" RESTART_UPDATE_SOURCE)
+  file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/src/CooperativeUpdate.cs" COOPERATIVE_UPDATE_SOURCE)
   file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/src/ImportedVoices.cs" IMPORT_SOURCE)
   file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}/PhononSAPI.exe" MANAGER_OUTPUT)
   add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/PhononSAPI.exe"
@@ -57,8 +59,8 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
       "/out:${MANAGER_OUTPUT}"
       /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll
       /r:System.Net.Http.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:Microsoft.CSharp.dll
-      "${MANAGER_SOURCE}" "${INSTALLER_SOURCE}" "${IMPORT_SOURCE}"
-    DEPENDS src/Manager.cs src/WindowsInstaller.cs src/ImportedVoices.cs VERBATIM)
+      "${MANAGER_SOURCE}" "${INSTALLER_SOURCE}" "${RESTART_UPDATE_SOURCE}" "${COOPERATIVE_UPDATE_SOURCE}" "${IMPORT_SOURCE}"
+    DEPENDS src/Manager.cs src/WindowsInstaller.cs src/RestartUpdate.cs src/CooperativeUpdate.cs src/ImportedVoices.cs VERBATIM)
   add_custom_target(PhononSettings ALL DEPENDS "${CMAKE_BINARY_DIR}/PhononSAPI.exe")
   configure_file(src/PhononSAPI.exe.config "${CMAKE_BINARY_DIR}/PhononSAPI.exe.config" COPYONLY)
 endif()

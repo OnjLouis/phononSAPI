@@ -4,6 +4,7 @@
 #include <msi.h>
 #include <msiquery.h>
 #include <RestartManager.h>
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
@@ -11,6 +12,8 @@
 namespace {
 constexpr DWORD Avx2Feature = 40;
 constexpr DWORD Net48Release = 528040;
+constexpr UINT MaxResourceUsers = 1024;
+constexpr DWORD SettingsExitTimeoutMs = 3000;
 constexpr wchar_t ClassKey[] = L"SOFTWARE\\Classes\\CLSID\\{5261CA16-3C40-4AD8-8EC6-4D4650485341}\\InprocServer32";
 std::wstring property(MSIHANDLE install, const wchar_t* name) {
     DWORD size = 0;
@@ -41,6 +44,41 @@ bool ownedRegistration(MSIHANDLE install, const std::wstring& folder) {
     }
     return true;
 }
+bool resourceUsers(DWORD session, std::vector<RM_PROCESS_INFO>& users) {
+    for (int attempt=0; attempt<4; ++attempt) {
+        UINT needed=0,count=static_cast<UINT>(users.size()); DWORD reasons=0;
+        DWORD result=RmGetList(session,&needed,&count,users.empty()?nullptr:users.data(),&reasons);
+        if (result==ERROR_SUCCESS) { users.resize(count); return true; }
+        if (result!=ERROR_MORE_DATA || needed<=count || needed>MaxResourceUsers) return false;
+        users.resize(needed);
+    }
+    return false;
+}
+void waitForSettingsExit(const RM_UNIQUE_PROCESS& user, const std::wstring& settingsPath) {
+    HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,user.dwProcessId);
+    if (!process) return;
+    struct CloseProcess {HANDLE handle;~CloseProcess(){CloseHandle(handle);}} close{process};
+    FILETIME started,exited,kernel,cpu;
+    std::wstring path(32768,L'\0'); DWORD size=static_cast<DWORD>(path.size());
+    if (GetProcessTimes(process,&started,&exited,&kernel,&cpu) && !CompareFileTime(&started,&user.ProcessStartTime) &&
+        QueryFullProcessImageNameW(process,0,path.data(),&size) && !_wcsicmp(path.c_str(),settingsPath.c_str()))
+        WaitForSingleObject(process,SettingsExitTimeoutMs);
+}
+std::wstring blockersMessage(const std::vector<RM_PROCESS_INFO>& users) {
+    std::wstring text=L"These applications are using Phonon:\n\n";
+    std::vector<std::wstring> names;
+    for (const auto& user:users) {
+        const wchar_t* name=user.strAppName[0]?user.strAppName:user.strServiceShortName;
+        if (!name[0]) name=L"An app Windows could not identify";
+        if (std::none_of(names.begin(),names.end(),[name](const std::wstring& existing){return !_wcsicmp(name,existing.c_str());}))
+            names.emplace_back(name);
+    }
+    constexpr size_t MaxShownNames=12;
+    size_t shown=(std::min)(names.size(),MaxShownNames);
+    for (size_t i=0;i<shown;++i) text+=names[i]+L"\n";
+    if (shown<names.size()) text+=L"And "+std::to_wstring(names.size()-shown)+L" more.\n";
+    return text+L"\nIf your screen reader is listed, switch it to another voice and keep it running. Save your work, close the other listed applications and try again. No apps were closed and no changes were made.";
+}
 }
 extern "C" __declspec(dllexport) UINT __stdcall CheckPhononUsage(MSIHANDLE install) {
     try {
@@ -63,11 +101,14 @@ extern "C" __declspec(dllexport) UINT __stdcall CheckPhononUsage(MSIHANDLE insta
         if (names.empty()) return ERROR_SUCCESS;
         if (RmRegisterResources(session,static_cast<UINT>(names.size()),names.data(),0,nullptr,0,nullptr)!=ERROR_SUCCESS)
             return fail(install,L"Windows could not check Phonon's files. No changes were made.");
-        UINT needed=0,count=0; DWORD reasons=0;
-        DWORD result=RmGetList(session,&needed,&count,nullptr,&reasons);
-        if (result==ERROR_MORE_DATA || needed)
-            return fail(install,L"Close Phonon SAPI and applications using its voices, then retry. If a screen reader is using Phonon, select another voice first. No applications will be closed automatically.");
-        if (result!=ERROR_SUCCESS) return fail(install,L"Windows could not determine whether Phonon is in use. No changes were made.");
+        std::vector<RM_PROCESS_INFO> users;
+        if (!resourceUsers(session,users)) return fail(install,L"Windows could not determine whether Phonon is in use. No changes were made.");
+        if (users.size()==1) {
+            // The settings app exits as soon as its elevated installer starts.
+            waitForSettingsExit(users[0].Process,folder+L"PhononSAPI.exe");
+            if (!resourceUsers(session,users)) return fail(install,L"Windows could not recheck applications using Phonon. No changes were made.");
+        }
+        if (!users.empty()) return fail(install,blockersMessage(users));
         return ERROR_SUCCESS;
     } catch (...) {return fail(install,L"The installation safety check failed. No changes were made.");}
 }

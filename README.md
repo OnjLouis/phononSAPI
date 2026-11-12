@@ -7,6 +7,11 @@ server or first-use download required.
 
 ## Changelog
 
+### 1.0.4
+
+- Check for updates with Shift+F1. The shortcut is announced separately from the button name.
+- The updater lists the apps using Phonon. When Windows can safely reopen them, it can close and reopen them for you. Otherwise, you can queue the update for your next restart.
+
 ### 1.0.3
 
 - Import compatible Phonon voice files and use them in 32-bit and 64-bit SAPI applications.
@@ -86,15 +91,25 @@ supported. Skip requests report zero skipped sentences.
 
 Update checking can be Never, Hourly or Daily. Daily is the default. Checks occur
 when the Phonon SAPI application is opened and while it remains open; there is no
-always-running updater. **Check for updates** checks immediately. Update checks
+always-running updater. **Check for updates** or **Shift+F1** checks immediately. Update checks
 and approved downloads contact GitHub; synthesis itself is entirely offline.
 
 Updates require a valid signature and matching product, version, size and hash.
-Close applications using Phonon before updating; select another voice first if
-your screen reader is using it. After your approval, Windows Installer opens
-and the settings window closes. Reopen Phonon SAPI from the Start menu afterward.
-An application still using the voice blocks installation; nothing is forcibly
-closed, and no restart is forced.
+If another application is using Phonon, the settings window stays open and
+lists the applications using it. Keep your screen reader running, but switch
+it to another voice if it is listed. Save your work, close the other listed applications and choose
+**Retry**, or choose **Cancel**. If all the listed apps support Windows' app
+restart feature, **Close apps and update** can close and reopen them for you.
+Save your work first. The updater does not automatically close screen readers.
+If you cannot safely close an app, choose
+**Install at next restart**. After you approve the administrator prompt, the
+verified update is queued. Save your work and restart Windows when ready;
+Phonon does not restart it or close any apps for you. Open Phonon SAPI again
+after signing in to see the result. To cancel before restarting, check for
+updates again and confirm that you want to cancel the scheduled update.
+Once Windows Installer starts, the settings window closes. Reopen Phonon SAPI
+from the Start menu afterward. Windows Installer checks again for applications
+using Phonon and does not force a restart.
 
 Updates replace the existing application in one folder rather than retaining
 copies of previous versions. Failed upgrades roll back. Saved preferences and

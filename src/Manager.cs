@@ -19,8 +19,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Phonon SAPI")]
-[assembly: AssemblyVersion("1.0.3.0")]
-[assembly: AssemblyFileVersion("1.0.3.0")]
+[assembly: AssemblyVersion("1.0.4.0")]
+[assembly: AssemblyFileVersion("1.0.4.0")]
 
 namespace PhononSapi {
     public sealed class Voice {
@@ -41,6 +41,7 @@ namespace PhononSapi {
         public bool Gpu = true;
         public string Interval = "daily";
         public DateTime LastCheck = DateTime.MinValue;
+        public string LastStartupUpdateNotice = "";
         public string Voice = "";
         public int ControlScale = 2;
         public int Rate = 50;
@@ -48,7 +49,7 @@ namespace PhononSapi {
         public int Volume = 100;
     }
     public static class App {
-        public const string Version = "1.0.3";
+        public const string Version = "1.0.4";
         internal const string UpgradeCode = "{7688E43D-5355-50FC-AFF3-541E76F34049}";
         internal const string SoftwareUrl = "https://onj.me/software";
         internal const string DonationUrl = "https://onj.me/donate";
@@ -140,9 +141,15 @@ namespace PhononSapi {
             }
         }
         [STAThread] public static int Main(string[] args) {
+            if(args.Length==1 && args[0]==RestartUpdate.ApplyOption) {
+                try{return RestartUpdate.Apply();}catch{return 1;}
+            }
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             try {
                 if (args.Length == 1 && args[0] == "--check-package") { Installer.Validate(Folder); return 0; }
+                if(args.Length==4 && args[0]==CooperativeUpdate.Option)return CooperativeUpdate.Run(args);
+                if(args.Length==2 && args[0]==RestartUpdate.QueueOption){RestartUpdate.Queue(args[1]);return 0;}
+                if(args.Length==1 && args[0]==RestartUpdate.CancelOption){RestartUpdate.Cancel();return 0;}
                 if (args.Length != 0) throw new ArgumentException("Unknown command line option.");
                 Application.Run(new MainForm()); return 0;
             } catch (Exception error) {
@@ -237,6 +244,7 @@ namespace PhononSapi {
     public sealed class UpdateInfo {
         public string product; public string version; public string url; public string sha256;
         public long size; public string changes;
+        internal string SignedManifest;
     }
     public sealed class Envelope { public string payload; public string signature; }
     public static class Updater {
@@ -257,6 +265,7 @@ namespace PhononSapi {
             }
             var info=App.Json.Deserialize<UpdateInfo>(new UTF8Encoding(false,true).GetString(payload));
             ValidateInfo(info);
+            info.SignedManifest=json;
             return info;
         }
         static void ValidateInfo(UpdateInfo info) {
@@ -317,15 +326,21 @@ namespace PhononSapi {
                     try {
                         if(!System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(folder),@"^[0-9a-f]{32}$") ||
                            (File.GetAttributes(folder)&FileAttributes.ReparsePoint)!=0)continue;
-                        var entries=Directory.EnumerateFileSystemEntries(folder).Take(2).ToArray();
-                        if(entries.Length!=1)continue;
-                        string file=entries[0];
-                        if(!System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(file),@"^Phonon-SAPI-\d+\.\d+\.\d+\.msi$") ||
-                           (File.GetAttributes(file)&(FileAttributes.ReparsePoint|FileAttributes.Directory))!=0 ||
-                           now-File.GetLastWriteTimeUtc(file)<TimeSpan.FromHours(24))continue;
-                        // An active installer may still hold the download; never force it closed.
-                        using(File.Open(file,FileMode.Open,FileAccess.Read,FileShare.None)){}
-                        File.Delete(file);Directory.Delete(folder,false);
+                        var entries=Directory.EnumerateFileSystemEntries(folder).Take(4).ToArray();
+                        if(entries.Length==0 || entries.Length>3)continue;
+                        bool hasRunner=entries.Any(file=>Path.GetFileName(file)==CooperativeUpdate.Runner);
+                        if(!hasRunner && entries.Length!=1)continue;
+                        if(entries.Any(file=>{
+                            string name=Path.GetFileName(file);
+                            bool known=System.Text.RegularExpressions.Regex.IsMatch(name,@"^Phonon-SAPI-\d+\.\d+\.\d+\.msi$") ||
+                                (hasRunner && (name==CooperativeUpdate.Runner || name=="phononSapi-update.json"));
+                            return !known || (File.GetAttributes(file)&(FileAttributes.ReparsePoint|FileAttributes.Directory))!=0 ||
+                                now-File.GetLastWriteTimeUtc(file)<TimeSpan.FromHours(24);
+                        }))continue;
+                        // Check all locks before removing anything, including an executing helper.
+                        foreach(string file in entries)using(File.Open(file,FileMode.Open,FileAccess.Read,FileShare.None)){}
+                        foreach(string file in entries)File.Delete(file);
+                        Directory.Delete(folder,false);
                     }catch(IOException){}catch(UnauthorizedAccessException){}
                 }
             }catch(IOException){}catch(UnauthorizedAccessException){}
@@ -369,7 +384,7 @@ namespace PhononSapi {
         readonly Label status=new Label {AutoSize=true,Text="Ready",AccessibleName="Status"};
         readonly TextBox backend=new TextBox {ReadOnly=true,Text="Not initialized."};
         DiagnosticsDialog diagnosticsWindow;
-        readonly Button play=new Button {Text="&Play"}, stop=new Button {Text="&Stop"}, check=new Button {Text="Check for &updates"};
+        readonly Button play=new Button {Text="&Play"}, stop=new Button {Text="&Stop"}, check=new UpdateCheckButton();
         dynamic speech;
         bool checking;
         readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer {Interval=60000};
@@ -422,10 +437,24 @@ namespace PhononSapi {
             help.Click+=(s,e)=>Process.Start(new ProcessStartInfo(Path.Combine(App.Folder,"Manual.html")){UseShellExecute=true});
             diagnostics.Click+=(s,e)=>{if(diagnosticsWindow==null || diagnosticsWindow.IsDisposed)diagnosticsWindow=new DiagnosticsDialog(App.Data);diagnosticsWindow.Show(this);diagnosticsWindow.BringToFront();};
             check.Click+=async(s,e)=>await Check(true);
-            timer.Tick+=async(s,e)=>await Check(false); Shown+=async(s,e)=>{timer.Start();backendTimer.Start();RefreshBackend();await Check(false);};
+            timer.Tick+=async(s,e)=>await Check(false); Shown+=async(s,e)=>{timer.Start();backendTimer.Start();RefreshBackend();ShowStartupUpdateNotice();await Check(false);};
             backendTimer.Tick+=(s,e)=>RefreshBackend();
-            FormClosing+=(s,e)=>{closing.Cancel();timer.Stop();backendTimer.Stop();Stop();Save();if(diagnosticsWindow!=null)diagnosticsWindow.Close();if(speech!=null) Marshal.FinalReleaseComObject(speech);};
+            FormClosing+=(s,e)=>{closing.Cancel();timer.Stop();backendTimer.Stop();ReleaseSpeech();Save();if(diagnosticsWindow!=null)diagnosticsWindow.Close();};
             FormClosed+=(s,e)=>{timer.Dispose();backendTimer.Dispose();closing.Dispose();};
+        }
+        void ShowStartupUpdateNotice() {
+            string notice=RestartUpdate.Notice();
+            if(notice.Length==0 || notice==preferences.LastStartupUpdateNotice)return;
+            preferences.LastStartupUpdateNotice=notice;Save();
+            MessageBox.Show(this,notice,"Phonon SAPI update",MessageBoxButtons.OK,MessageBoxIcon.Information);
+        }
+        protected override bool ProcessCmdKey(ref Message msg,Keys keyData) {
+            return HandleUpdateShortcut(keyData,check.PerformClick) || base.ProcessCmdKey(ref msg,keyData);
+        }
+        internal static bool HandleUpdateShortcut(Keys keyData,Action checkNow) {
+            if(keyData!=UpdateCheckButton.ShortcutKeys)return false;
+            checkNow();
+            return true;
         }
         internal static void Add(TableLayoutPanel panel,string label,Control control) {
             int row=panel.RowCount++; panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -499,6 +528,12 @@ namespace PhononSapi {
             } catch(Exception error) {MessageBox.Show(this,error.Message,"Phonon SAPI",MessageBoxButtons.OK,MessageBoxIcon.Error);}
         }
         void Stop() { try {if(speech!=null) speech.Speak("",3);status.Text="Ready";}catch(Exception error){App.Log(error.Message);} }
+        void ReleaseSpeech() {
+            Stop();
+            if(speech==null)return;
+            try{Marshal.FinalReleaseComObject(speech);}
+            finally{speech=null;}
+        }
         void Maintenance(bool remove) {
             Stop();
             if(MessageBox.Show(this,remove?"Remove Phonon SAPI and its voice registrations? Your saved preferences will be kept. This settings window will close.":"Repair the Phonon SAPI installation? This settings window will close. Close other applications using these voices first.","Phonon SAPI",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
@@ -510,18 +545,118 @@ namespace PhononSapi {
             if(!manual && (DateTime.UtcNow-preferences.LastCheck).TotalHours<hours) return;
             checking=true;check.Enabled=false;
             preferences.LastCheck=DateTime.UtcNow;Save();
+            var cancellation=closing.Token;
+            bool preparingInstall=false;
             try {
+                if(RestartUpdate.Notice()==RestartUpdate.PendingNotice) {
+                    status.Text=RestartUpdate.PendingNotice;
+                    if(manual && MessageBox.Show(this,status.Text+"\n\nCancel the scheduled update? Administrator approval is required.",
+                        "Phonon SAPI update",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)==DialogResult.Yes) {
+                        await Task.Run(()=>RestartUpdate.RequestCancel());
+                        if(!cancellation.IsCancellationRequested)ShowStartupUpdateNotice();
+                    }
+                    return;
+                }
                 status.Text="Checking for updates..."; var update=await Updater.Check();
-                if(closing.IsCancellationRequested) return;
+                if(cancellation.IsCancellationRequested) return;
                 status.Text=update==null?"Phonon SAPI is up to date.":"Update available: "+update.version;
-                if(update==null) return;
-                if(MessageBox.Show(this,"Install Phonon SAPI "+update.version+"?\n\n"+update.changes+"\n\nClose applications using these voices first. Administrator permission will be requested, then this settings window will close. Reopen it from the Start menu afterward. No applications will be forcibly closed.","Phonon SAPI update",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+                if(update==null) {
+                    if(manual)MessageBox.Show(this,status.Text,"Phonon SAPI updates",MessageBoxButtons.OK,MessageBoxIcon.Information);
+                    return;
+                }
+                if(MessageBox.Show(this,"Install Phonon SAPI "+update.version+"?\n\n"+update.changes+"\n\nAdministrator permission will be requested. Once Windows Installer starts, this settings window will close. Reopen it from the Start menu afterward.","Phonon SAPI update",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+                preparingInstall=true;play.Enabled=false;ReleaseSpeech();
+                WindowsInstaller.ResourceUser[] approved=null;
+                Action<WindowsInstaller.ResourceUser[]> approve=users=>approved=users;
+                var choice=await UpdatePreflight.Check(this,App.InstallRoot,value=>status.Text=value,App.Log,cancellation,true,approve);
+                if(choice==UpdateChoice.Cancel)return;
                 status.Text="Downloading and verifying update...";
-                string installer=await Updater.Download(update,closing.Token);
-                WindowsInstaller.Install(installer);
+                string installer=await Updater.Download(update,cancellation);
+                if(choice==UpdateChoice.InstallNow)
+                    choice=await UpdatePreflight.Check(this,App.InstallRoot,value=>status.Text=value,App.Log,cancellation,true,approve);
+                if(choice==UpdateChoice.Cancel)return;
+                if(choice==UpdateChoice.InstallAtRestart) {
+                    if(MessageBox.Show(this,"Queue this update for the next Windows restart? Administrator approval is required. Phonon will not close apps or restart Windows for you.",
+                        "Install Phonon SAPI at restart",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+                    await Task.Run(()=>RestartUpdate.Request(installer,update));
+                    if(cancellation.IsCancellationRequested)return;
+                    status.Text=RestartUpdate.PendingNotice;
+                    ShowStartupUpdateNotice();
+                    return;
+                }
+                if(choice==UpdateChoice.CloseAppsAndInstall)CooperativeUpdate.Start(installer,update,approved);
+                else WindowsInstaller.Install(installer);
                 Close();
-            } catch(OperationCanceledException) {} catch(Exception error) {App.Log(error.ToString());status.Text="Update check failed. See the diagnostic log.";if(manual)MessageBox.Show(this,error.Message,"Phonon SAPI updates");}
-            finally {checking=false;if(!IsDisposed)check.Enabled=true;}
+            } catch(OperationCanceledException) {} catch(Exception error) {
+                App.Log(error.ToString());
+                if(!cancellation.IsCancellationRequested) {
+                    status.Text="Update failed. See the diagnostic log.";
+                    if(manual || preparingInstall)MessageBox.Show(this,error.Message,"Phonon SAPI updates",MessageBoxButtons.OK,MessageBoxIcon.Error);
+                }
+            } finally {checking=false;if(!IsDisposed){check.Enabled=true;if(preparingInstall)play.Enabled=true;}}
+        }
+    }
+
+    internal sealed class UpdateCheckButton : Button {
+        internal const Keys ShortcutKeys=Keys.Shift|Keys.F1;
+        public UpdateCheckButton() {Text="Check for updates";AccessibleRole=AccessibleRole.PushButton;}
+        protected override AccessibleObject CreateAccessibilityInstance() {return new ShortcutAccessibleObject(this);}
+        sealed class ShortcutAccessibleObject : Control.ControlAccessibleObject {
+            public ShortcutAccessibleObject(UpdateCheckButton owner):base(owner) {}
+            public override string KeyboardShortcut {get{return "Shift+F1";}}
+        }
+    }
+
+    internal enum UpdateChoice { Cancel, InstallNow, InstallAtRestart, CloseAppsAndInstall }
+
+    internal static class UpdatePreflight {
+        internal static async Task<UpdateChoice> Check(IWin32Window owner,string installRoot,Action<string> status,Action<string> log,CancellationToken cancellation,bool allowRestart,
+            Action<WindowsInstaller.ResourceUser[]> approveClose=null) {
+            int pid;
+            using(var process=Process.GetCurrentProcess())pid=process.Id;
+            while(!cancellation.IsCancellationRequested) {
+                status("Checking for applications using Phonon...");
+                var users=await Task.Run(()=>WindowsInstaller.FindResourceUsers(installRoot,pid),cancellation);
+                if(cancellation.IsCancellationRequested)return UpdateChoice.Cancel;
+                if(users.Length==0)return UpdateChoice.InstallNow;
+                string[] blockers=WindowsInstaller.BlockerNames(users);
+                log("Update blocked by: "+String.Join("; ",blockers));
+                string message="These applications are using Phonon:\n\n"+String.Join("\n",blockers.Take(12));
+                if(blockers.Length>12)message+="\nAnd "+(blockers.Length-12)+" more. See Diagnostics for the full list.";
+                bool canClose=approveClose!=null && blockers.Length<=12 && users.Length<=32 && await Task.Run(()=>WindowsInstaller.CanRestart(users),cancellation);
+                if(cancellation.IsCancellationRequested)return UpdateChoice.Cancel;
+                message+="\n\nIf your screen reader is listed, switch it to a different voice and keep it running. Save your work, close the other listed applications, then choose Retry.";
+                if(canClose)message+="\n\nClose apps and update asks Windows to close and reopen the listed apps for you. Save your work first.";
+                DialogResult decision=allowRestart?ShowRestartChoices(owner,message,canClose):MessageBox.Show(owner,message,"Phonon SAPI update blocked",MessageBoxButtons.RetryCancel,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2);
+                if(decision==DialogResult.Yes)return UpdateChoice.InstallAtRestart;
+                if(decision==DialogResult.OK && canClose){approveClose(users);return UpdateChoice.CloseAppsAndInstall;}
+                if(decision!=DialogResult.Retry) {
+                    status("Update cancelled. Phonon SAPI was not changed.");
+                    return UpdateChoice.Cancel;
+                }
+            }
+            return UpdateChoice.Cancel;
+        }
+        static DialogResult ShowRestartChoices(IWin32Window owner,string message,bool canClose) {
+            using(var dialog=CreateRestartChoices(message,canClose))return dialog.ShowDialog(owner);
+        }
+        internal static Form CreateRestartChoices(string message,bool canClose=false) {
+            var dialog=new Form {Text="Phonon SAPI update blocked",StartPosition=FormStartPosition.CenterParent,
+                ClientSize=new Size(550,290),MinimizeBox=false,MaximizeBox=false,ShowInTaskbar=false,FormBorderStyle=FormBorderStyle.FixedDialog};
+            var layout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=new Padding(12)};
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var details=new TextBox {Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill,
+                AccessibleName="Applications using Phonon",Text=(message+"\n\nChoose Install at next restart to leave all apps running now.").Replace("\n","\r\n")};
+            var buttons=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill};
+            var retry=new Button {Text="&Retry",DialogResult=DialogResult.Retry,AutoSize=true};
+            var restart=new Button {Text="&Install at next restart",DialogResult=DialogResult.Yes,AutoSize=true};
+            var cancel=new Button {Text="Cancel",DialogResult=DialogResult.Cancel,AutoSize=true};
+            buttons.Controls.AddRange(new Control[]{retry,restart});
+            if(canClose)buttons.Controls.Add(new Button {Text="&Close apps and update",DialogResult=DialogResult.OK,AutoSize=true});
+            buttons.Controls.Add(cancel);
+            layout.Controls.Add(details,0,0);layout.Controls.Add(buttons,0,1);dialog.Controls.Add(layout);
+            dialog.CancelButton=cancel;dialog.Shown+=(s,e)=>{details.Focus();details.Select(0,0);};
+            return dialog;
         }
     }
 }

@@ -22,11 +22,18 @@ namespace PhononSapi {
                 string extra=create(new string('d',32),"Phonon-SAPI-1.0.0.msi");File.WriteAllText(Path.Combine(Path.GetDirectoryName(extra),"keep.txt"),"keep");
                 string foreign=create("not-an-update-id","Phonon-SAPI-1.0.0.msi");
                 string locked=create(new string('e',32),"Phonon-SAPI-1.0.0.msi");
-                using(var held=new FileStream(locked,FileMode.Open,FileAccess.Read,FileShare.None))method.Invoke(null,new object[]{root,now});
+                string staleHelper=create(new string('f',32),"PhononCooperativeUpdate.exe");
+                string lockedHelper=create(new string('0',32),"PhononCooperativeUpdate.exe");
+                string lockedHelperManifest=create(new string('0',32),"phononSapi-update.json");
+                using(var held=new FileStream(locked,FileMode.Open,FileAccess.Read,FileShare.None))
+                using(var active=new FileStream(lockedHelper,FileMode.Open,FileAccess.Read,FileShare.Read))
+                    method.Invoke(null,new object[]{root,now});
                 Assert(!Directory.Exists(Path.GetDirectoryName(stale)),"Stale download retained");
-                foreach(string file in new[]{recent,unknown,extra,foreign,locked})Assert(File.Exists(file),"Unrelated/recent/locked file removed");
+                Assert(!Directory.Exists(Path.GetDirectoryName(staleHelper)),"Stale cooperative helper retained");
+                foreach(string file in new[]{recent,unknown,extra,foreign,locked,lockedHelper,lockedHelperManifest})Assert(File.Exists(file),"Unrelated/recent/locked file removed");
                 method.Invoke(null,new object[]{root,now});
                 Assert(!Directory.Exists(Path.GetDirectoryName(locked)),"Unlocked stale download retained");
+                Assert(!Directory.Exists(Path.GetDirectoryName(lockedHelper)),"Unlocked cooperative helper retained");
                 Console.WriteLine("Update cache: stale removed; recent, unknown, extra-content and locked paths preserved");
                 return 0;
             } finally {Directory.Delete(root,true);}
