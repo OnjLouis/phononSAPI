@@ -8,6 +8,7 @@
 #include <mutex>
 #include <memory>
 #include <vector>
+#include "SapiImportEnumerator.h"
 
 using namespace phonon;
 static const CLSID EngineId = {0x5261ca16,0x3c40,0x4ad8,{0x8e,0xc6,0x4d,0x46,0x50,0x48,0x53,0x41}};
@@ -288,8 +289,9 @@ public:
 
 class Factory final : public IClassFactory {
     std::atomic<ULONG> refs{1};
+    const bool enumerator;
 public:
-    Factory() { ++objects; }
+    explicit Factory(bool enumerate) : enumerator(enumerate) { ++objects; }
     ~Factory() { --objects; }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
         if (!out) return E_POINTER;
@@ -303,6 +305,7 @@ public:
         if (!out) return E_POINTER;
         *out = nullptr;
         if (outer) return CLASS_E_NOAGGREGATION;
+        if (enumerator) return createImportEnumerator(objects,id,out);
         try { auto engine = new Engine; HRESULT hr = engine->QueryInterface(id,out); engine->Release(); return hr; }
         catch (...) { return E_OUTOFMEMORY; }
     }
@@ -311,8 +314,8 @@ public:
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID id, void** out) {
     if (!out) return E_POINTER;
     *out = nullptr;
-    if (clsid != EngineId) return CLASS_E_CLASSNOTAVAILABLE;
-    auto factory = new (std::nothrow) Factory;
+    if (clsid != EngineId && clsid != ImportEnumeratorId) return CLASS_E_CLASSNOTAVAILABLE;
+    auto factory = new (std::nothrow) Factory(clsid == ImportEnumeratorId);
     if (!factory) return E_OUTOFMEMORY;
     HRESULT hr = factory->QueryInterface(id,out); factory->Release(); return hr;
 }

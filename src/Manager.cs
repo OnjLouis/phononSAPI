@@ -19,8 +19,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Phonon SAPI")]
-[assembly: AssemblyVersion("1.0.1.0")]
-[assembly: AssemblyFileVersion("1.0.1.0")]
+[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyFileVersion("1.0.3.0")]
 
 namespace PhononSapi {
     public sealed class Voice {
@@ -48,7 +48,7 @@ namespace PhononSapi {
         public int Volume = 100;
     }
     public static class App {
-        public const string Version = "1.0.1";
+        public const string Version = "1.0.3";
         internal const string UpgradeCode = "{7688E43D-5355-50FC-AFF3-541E76F34049}";
         internal const string SoftwareUrl = "https://onj.me/software";
         internal const string DonationUrl = "https://onj.me/donate";
@@ -332,12 +332,35 @@ namespace PhononSapi {
         }
     }
 
+    internal sealed class PreviewSample {
+        public string Text { get; private set; }
+        public bool IsCustom { get; private set; }
+        public PreviewSample() { Reset("en-GB"); }
+        public void Edit(string text) { Text=text; IsCustom=true; }
+        public void Follow(string locale) { if(!IsCustom)Reset(locale); }
+        public void Reset(string locale) {
+            switch((locale??"").Split('-')[0].ToLowerInvariant()) {
+                case "de": Text="Guten Tag! So klingt Phonon auf Deutsch."; break;
+                case "es": Text="\u00a1Hola! As\u00ed suena Phonon en espa\u00f1ol."; break;
+                case "fr": Text="Bonjour ! Voici un aper\u00e7u de Phonon en fran\u00e7ais."; break;
+                case "pt": Text="Ol\u00e1! Este \u00e9 um exemplo da voz do Phonon em portugu\u00eas."; break;
+                default: Text="Hello! This is how Phonon sounds in English."; break;
+            }
+            IsCustom=false;
+        }
+    }
+
     public sealed class MainForm : Form {
         readonly Preferences preferences=App.LoadPreferences();
         readonly List<Voice> catalogue=App.Voices(App.Folder);
+        readonly ImportedVoices imports=new ImportedVoices(App.Data,App.Folder);
         readonly ComboBox languages=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList};
         readonly ListBox voices=new ListBox();
-        readonly TextBox text=new TextBox {Multiline=true,ScrollBars=ScrollBars.Vertical,Text="Welcome to Phonon. These voices work with Windows speech applications."};
+        readonly TextBox text=new TextBox {Multiline=true,ScrollBars=ScrollBars.Vertical};
+        readonly PreviewSample preview=new PreviewSample();
+        readonly Button resetSample=new Button {Text="Reset Sampl&e",AutoSize=true};
+        readonly Button manageVoices=new Button {Text="&Manage Imported Voices...",AutoSize=true};
+        bool synchronizingPreview;
         readonly NumericUpDown rate=new NumericUpDown {Minimum=0,Maximum=100,Increment=5};
         readonly NumericUpDown pitch=new NumericUpDown {Minimum=0,Maximum=100,Increment=5};
         readonly NumericUpDown volume=new NumericUpDown {Minimum=0,Maximum=100,Value=100};
@@ -362,6 +385,7 @@ namespace PhononSapi {
             Add(layout,"&Language:",languages); languages.Items.Add(new LanguageChoice());
             languages.Items.AddRange(catalogue.Select(v=>v.locale).Distinct().Select(x=>new LanguageChoice{Locale=x}).Cast<object>().ToArray());
             Add(layout,"&Voice:",voices); voices.Height=160;
+            Add(layout,"",manageVoices);
             Add(layout,"Te&xt:",text); text.Height=100;
             Add(layout,"&Rate:",rate); Add(layout,"Pi&tch:",pitch); Add(layout,"V&olume:",volume);
             rate.Value=preferences.Rate;
@@ -369,12 +393,13 @@ namespace PhononSapi {
             volume.Value=Math.Max(0,Math.Min(100,preferences.Volume));
             gpu.Checked=preferences.Gpu; Add(layout,"",gpu);
             Add(layout,"Synthesis &backend:",backend);
-            var buttons=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill}; buttons.Controls.Add(play); buttons.Controls.Add(stop); Add(layout,"",buttons);
+            var buttons=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill};
+            buttons.Controls.AddRange(new Control[]{play,stop,resetSample}); Add(layout,"",buttons);
             Add(layout,"Update &check:",interval); interval.Items.AddRange(new object[]{"Never","Hourly","Daily"});
             interval.SelectedIndex=preferences.Interval=="never"?0:preferences.Interval=="hourly"?1:2;
             Add(layout,"",check);
             var maintenance=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill};
-            var install=new Button {Text="Repair &installation",AutoSize=true}; var remove=new Button {Text="Re&move application",AutoSize=true}; var help=new Button {Text="&Help"};
+            var install=new Button {Text="Repair &installation",AutoSize=true}; var remove=new Button {Text="Remove &application",AutoSize=true}; var help=new Button {Text="&Help"};
             var diagnostics=new Button {Text="&Diagnostics",AutoSize=true};
             maintenance.Controls.AddRange(new Control[]{install,remove,help,diagnostics}); Add(layout,"",maintenance);
             var websites=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill};
@@ -382,10 +407,16 @@ namespace PhononSapi {
             var donate=new Button {Text="Do&nate",AutoSize=true,Tag=App.DonationUrl};
             websites.Controls.AddRange(new Control[]{software,donate});Add(layout,"",websites);Add(layout,"",status);
             software.Click+=(s,e)=>OpenWebsite(App.SoftwareUrl);donate.Click+=(s,e)=>OpenWebsite(App.DonationUrl);
+            text.TextChanged+=(s,e)=>{if(!synchronizingPreview)preview.Edit(text.Text);};
+            resetSample.Click+=(s,e)=>{Stop();preview.Reset(PreviewLocale());UpdatePreview();};
             languages.SelectedIndexChanged+=(s,e)=>RefreshVoices(); languages.SelectedIndex=0;
             gpu.CheckedChanged+=(s,e)=>Save(); interval.SelectedIndexChanged+=(s,e)=>Save();
             rate.ValueChanged+=(s,e)=>Save(); pitch.ValueChanged+=(s,e)=>Save(); volume.ValueChanged+=(s,e)=>Save();
-            voices.SelectedIndexChanged+=(s,e)=>Save();
+            voices.SelectedIndexChanged+=(s,e)=>{
+                if(voices.SelectedItem is Voice)FollowPreview();
+                Save();
+            };
+            manageVoices.Click+=(s,e)=>ManageVoices();
             play.Click+=(s,e)=>Play(); stop.Click+=(s,e)=>Stop();
             install.Click+=(s,e)=>Maintenance(false); remove.Click+=(s,e)=>Maintenance(true);
             help.Click+=(s,e)=>Process.Start(new ProcessStartInfo(Path.Combine(App.Folder,"Manual.html")){UseShellExecute=true});
@@ -396,20 +427,52 @@ namespace PhononSapi {
             FormClosing+=(s,e)=>{closing.Cancel();timer.Stop();backendTimer.Stop();Stop();Save();if(diagnosticsWindow!=null)diagnosticsWindow.Close();if(speech!=null) Marshal.FinalReleaseComObject(speech);};
             FormClosed+=(s,e)=>{timer.Dispose();backendTimer.Dispose();closing.Dispose();};
         }
-        static void Add(TableLayoutPanel panel,string label,Control control) {
+        internal static void Add(TableLayoutPanel panel,string label,Control control) {
             int row=panel.RowCount++; panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            if(label.Length>0) { var name=new Label {Text=label,AutoSize=true,Anchor=AnchorStyles.Left}; panel.Controls.Add(name,0,row); control.AccessibleName=label.Replace("&","").TrimEnd(':'); }
+            if(label.Length>0) { var name=new Label {Text=label,AutoSize=true,Anchor=AnchorStyles.Left,TabIndex=row*2}; panel.Controls.Add(name,0,row); control.AccessibleName=label.Replace("&","").TrimEnd(':'); }
+            control.TabIndex=row*2+1;
             control.Dock=DockStyle.Fill; control.Margin=new Padding(4,4,4,8); panel.Controls.Add(control,1,row);
         }
-        void RefreshVoices() {
+        void RefreshVoices(string preferred=null) {
             var selected=voices.SelectedItem as Voice;
-            string name=selected==null?preferences.Voice:selected.id;
+            string name=preferred??(selected==null?preferences.Voice:selected.id);
+            var available=new List<Voice>(catalogue);
+            try {available.AddRange(imports.List());}
+            catch(IOException error){App.Log(error.Message);}
+            catch(UnauthorizedAccessException error){App.Log(error.Message);}
             voices.BeginUpdate(); voices.Items.Clear();
             var language=languages.SelectedItem as LanguageChoice;
-            voices.Items.AddRange(catalogue.Where(v=>language==null || language.Locale==null || v.locale==language.Locale).Cast<object>().ToArray());
+            voices.Items.AddRange(available.Where(v=>language==null || language.Locale==null || v.locale==language.Locale).Cast<object>().ToArray());
             voices.SelectedItem=voices.Items.Cast<Voice>().FirstOrDefault(v=>v.id==name);
             if(voices.SelectedIndex<0 && voices.Items.Count>0) voices.SelectedIndex=0;
             voices.EndUpdate();
+            FollowPreview();
+        }
+        void ManageVoices() {
+            Stop();
+            var selected=voices.SelectedItem as Voice;
+            using(var dialog=new ManageImportedVoicesDialog(imports,selected==null?null:selected.id,PreviewLocale())) {
+                dialog.ShowDialog(this);
+                if(dialog.Changed) {
+                    var filter=languages.SelectedItem as LanguageChoice;
+                    if(dialog.LastAdded!=null && filter!=null && filter.Locale!=null && filter.Locale!=dialog.LastAddedLocale)
+                        languages.SelectedIndex=0;
+                    RefreshVoices(dialog.LastAdded);Save();
+                }
+            }
+            manageVoices.Focus();
+        }
+        string PreviewLocale() {
+            var voice=voices.SelectedItem as Voice;
+            var language=languages.SelectedItem as LanguageChoice;
+            return voice!=null?voice.locale:(language==null?null:language.Locale);
+        }
+        void FollowPreview() {preview.Follow(PreviewLocale());UpdatePreview();}
+        void UpdatePreview() {
+            if(text.Text==preview.Text)return;
+            synchronizingPreview=true;
+            try {text.Text=preview.Text;}
+            finally {synchronizingPreview=false;}
         }
         void RefreshBackend() {string value=BackendStatus.Current(gpu.Checked);if(backend.Text!=value)backend.Text=value;}
         void OpenWebsite(string url) {

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "SapiImportedVoice.h"
 
 using namespace phonon;
 static void log(const std::string& message) noexcept {
@@ -43,6 +44,8 @@ struct Native {
     bool (*voice)(void*, const char*);
     bool (*language)(void*, const char*);
     void (*free)(void*);
+    bool (*importVoice)(void*, const uint8_t*, size_t) = nullptr;
+    std::string activeImport;
     const char* (*error)(void*);
     ~Native() { if (engine) free(engine); if (library) FreeLibrary(library); }
     template<class T> void symbol(T& fn, const char* name) {
@@ -57,7 +60,17 @@ struct Native {
             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         if (!library) throw std::runtime_error("Cannot load Phonon runtime");
         symbol(create,"ptts_new"); symbol(speak,"ptts_speak"); symbol(voice,"ptts_set_voice");
+        symbol(importVoice,"ptts_set_imported_voice");
         symbol(language,"ptts_set_language"); symbol(free,"ptts_free"); symbol(error,"ptts_last_error");
+    }
+    bool selectVoice(const std::string& id) {
+        if (id.rfind("imported-", 0) == 0) {
+            if (selectImportedVoice(engine, id, activeImport, importVoice)) return true;
+            activeImport.clear();
+            return voice(engine, "Freya");
+        }
+        activeImport.clear();
+        return voice(engine, id.c_str());
     }
     void open(bool gpu) {
         if (!IsProcessorFeaturePresent(40)) throw std::runtime_error("An AVX2-capable processor is required");
@@ -136,7 +149,7 @@ int wmain(int argc, wchar_t** argv) {
                 language.find('\0') != language.npos) return 3;
             try {
                 if (!native.engine) native.open(request.gpu != 0);
-                if (!native.voice(native.engine, voice.c_str()) || !native.language(native.engine, language.c_str()))
+                if (!native.selectVoice(voice) || !native.language(native.engine, language.c_str()))
                     throw std::runtime_error("The requested voice or language is unavailable");
                 auto stream = sonicCreateStream(SampleRate, 1);
                 if (!stream) throw std::bad_alloc();

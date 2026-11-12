@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(PhononSAPI VERSION 1.0.0 LANGUAGES C CXX)
+project(PhononSAPI VERSION 1.0.3 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT WIN32)
@@ -13,7 +13,7 @@ endif()
 add_library(PhononAdapter SHARED src/engine.cpp src/engine.def)
 set_target_properties(PhononAdapter PROPERTIES PREFIX "" OUTPUT_NAME "PhononSAPI${VOICE_BITS}")
 target_compile_definitions(PhononAdapter PRIVATE _WIN32_WINNT=0x0A00)
-target_link_libraries(PhononAdapter PRIVATE ole32 uuid sapi advapi32)
+target_link_libraries(PhononAdapter PRIVATE ole32 uuid sapi advapi32 shell32)
 if(MINGW)
   if(NOT SAPI_DDK_INCLUDE)
     message(FATAL_ERROR "Set SAPI_DDK_INCLUDE to the Windows SDK folder containing sapiddk.h")
@@ -43,20 +43,22 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   add_executable(PhononHost src/host.cpp "${SONIC_DIR}/sonic.c")
   target_include_directories(PhononHost PRIVATE "${SONIC_DIR}")
   target_compile_definitions(PhononHost PRIVATE _WIN32_WINNT=0x0A00)
+  target_link_libraries(PhononHost PRIVATE ole32 uuid shell32)
   if(MINGW)
     target_link_options(PhononHost PRIVATE -static -municode)
   endif()
   find_program(CSC csc PATHS "$ENV{WINDIR}/Microsoft.NET/Framework64/v4.0.30319" REQUIRED)
   file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/src/Manager.cs" MANAGER_SOURCE)
   file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/src/WindowsInstaller.cs" INSTALLER_SOURCE)
+  file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/src/ImportedVoices.cs" IMPORT_SOURCE)
   file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}/PhononSAPI.exe" MANAGER_OUTPUT)
   add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/PhononSAPI.exe"
     COMMAND "${CSC}" /nologo /target:winexe /platform:x64 /optimize+
       "/out:${MANAGER_OUTPUT}"
       /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll
       /r:System.Net.Http.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:Microsoft.CSharp.dll
-      "${MANAGER_SOURCE}" "${INSTALLER_SOURCE}"
-    DEPENDS src/Manager.cs src/WindowsInstaller.cs VERBATIM)
+      "${MANAGER_SOURCE}" "${INSTALLER_SOURCE}" "${IMPORT_SOURCE}"
+    DEPENDS src/Manager.cs src/WindowsInstaller.cs src/ImportedVoices.cs VERBATIM)
   add_custom_target(PhononSettings ALL DEPENDS "${CMAKE_BINARY_DIR}/PhononSAPI.exe")
   configure_file(src/PhononSAPI.exe.config "${CMAKE_BINARY_DIR}/PhononSAPI.exe.config" COPYONLY)
 endif()

@@ -405,6 +405,17 @@
           <RegistryValue Name="ThreadingModel" Type="string" Value="Both" />
         </RegistryKey>
       </Component>
+      <Component Id="ImportCom64" Guid="072FECDD-A779-5B58-997B-22FE9527BEA3" Directory="TARGETDIR" Bitness="always64">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CLSID\{7F96A3ED-EFB8-4986-A974-6E0E227B157E}\InprocServer32" ForceDeleteOnUninstall="yes">
+          <RegistryValue Type="string" Value="[INSTALLFOLDER]PhononSAPI64.dll" KeyPath="yes" />
+          <RegistryValue Name="ThreadingModel" Type="string" Value="Both" />
+        </RegistryKey>
+      </Component>
+      <Component Id="ImportEnum64" Guid="512289E0-0ED7-56A2-B1DE-FB6F50B6A298" Directory="TARGETDIR" Bitness="always64">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Microsoft\Speech\Voices\TokenEnums\PhononSAPIImports" ForceDeleteOnUninstall="yes">
+          <RegistryValue Name="CLSID" Type="string" Value="{7F96A3ED-EFB8-4986-A974-6E0E227B157E}" KeyPath="yes" />
+        </RegistryKey>
+      </Component>
       <Component Id="voice_64_bb7242ad66666780" Guid="89669E2E-3CB9-55B8-AF7B-69B92B9725B8" Directory="TARGETDIR" Bitness="always64">
         <RegistryKey Root="HKLM" Key="SOFTWARE\Microsoft\Speech\Voices\Tokens\PhononSAPI_00_alfie_bb7242ad66666780" ForceDeleteOnUninstall="yes">
           <RegistryValue Type="string" Value="Alfie - Phonon (English UK)" />
@@ -1927,6 +1938,17 @@
         <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CLSID\{5261CA16-3C40-4AD8-8EC6-4D4650485341}\InprocServer32" ForceDeleteOnUninstall="yes">
           <RegistryValue Type="string" Value="[INSTALLFOLDER]PhononSAPI32.dll" KeyPath="yes" />
           <RegistryValue Name="ThreadingModel" Type="string" Value="Both" />
+        </RegistryKey>
+      </Component>
+      <Component Id="ImportCom32" Guid="FAA0AAE0-1637-5563-8D0D-C0E53C5E671F" Directory="TARGETDIR" Bitness="always32">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CLSID\{7F96A3ED-EFB8-4986-A974-6E0E227B157E}\InprocServer32" ForceDeleteOnUninstall="yes">
+          <RegistryValue Type="string" Value="[INSTALLFOLDER]PhononSAPI32.dll" KeyPath="yes" />
+          <RegistryValue Name="ThreadingModel" Type="string" Value="Both" />
+        </RegistryKey>
+      </Component>
+      <Component Id="ImportEnum32" Guid="444581B7-BDE3-5055-8A61-4040C1F14376" Directory="TARGETDIR" Bitness="always32">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Microsoft\Speech\Voices\TokenEnums\PhononSAPIImports" ForceDeleteOnUninstall="yes">
+          <RegistryValue Name="CLSID" Type="string" Value="{7F96A3ED-EFB8-4986-A974-6E0E227B157E}" KeyPath="yes" />
         </RegistryKey>
       </Component>
       <Component Id="voice_32_bb7242ad66666780" Guid="38775762-6570-565E-8E50-25D4F13D0E02" Directory="TARGETDIR" Bitness="always32">

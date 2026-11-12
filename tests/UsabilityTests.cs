@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Collections.Generic;
+using System.Windows.Forms;
 namespace PhononSapi {
     public static class UsabilityTests {
         static int failures;
@@ -18,6 +19,7 @@ namespace PhononSapi {
             return method.Invoke(null,args);
         }
         static Preferences Parse(string json){return (Preferences)Call(typeof(App),"ParsePreferences",json);}
+        [STAThread]
         public static int Main(string[] args) {
             if(args.Length==1 && args[0]=="--https-probe") {
                 using(var client=Updater.Client())using(var response=client.GetAsync("https://api.github.com/repos/gradium-ai/xn-ptts/releases/latest").GetAwaiter().GetResult()) {
@@ -25,6 +27,53 @@ namespace PhononSapi {
                 }
             }
             string folder=args[0];
+            Test("preview follows every voice language, including character voices",()=>{
+                var preview=new PreviewSample();
+                foreach(var row in new[]{new[]{"en-GB","Hello!"},new[]{"en-US","Hello!"},new[]{"en","Hello!"},
+                    new[]{"fr-FR","Bonjour !"},new[]{"de-DE","Guten Tag!"},new[]{"pt-BR","Ol\u00e1!"},
+                    new[]{"es-ES","\u00a1Hola!"},new[]{"es-MX","\u00a1Hola!"}}) {
+                    preview.Follow(row[0]);
+                    Assert(preview.Text.StartsWith(row[1],StringComparison.Ordinal) && !preview.IsCustom);
+                }
+            });
+            Test("preview keeps edits and reset follows the new language",()=>{
+                var preview=new PreviewSample();
+                preview.Edit("My own text"); preview.Follow("fr-FR");
+                Assert(preview.Text=="My own text" && preview.IsCustom);
+                preview.Edit(""); preview.Follow("de-DE");
+                Assert(preview.Text=="" && preview.IsCustom);
+                preview.Reset("de-DE");
+                Assert(preview.Text=="Guten Tag! So klingt Phonon auf Deutsch." && !preview.IsCustom);
+            });
+            Test("settings controls follow the selected voice and preserve typed text",()=>{
+                const BindingFlags appFields=BindingFlags.Public|BindingFlags.Static;
+                var dataField=typeof(App).GetField("Data",appFields);
+                var folderField=typeof(App).GetField("Folder",appFields);
+                string originalData=App.Data, originalFolder=App.Folder;
+                string isolated=Path.Combine(Path.GetDirectoryName(Path.GetFullPath(folder)),"settings-fixture");
+                try {
+                    dataField.SetValue(null,isolated);
+                    folderField.SetValue(null,Path.GetFullPath(folder));
+                    Assert(App.PreferencesFile==Path.Combine(isolated,"settings.json"));
+                    using(var form=new MainForm()) {
+                        var fields=BindingFlags.NonPublic|BindingFlags.Instance;
+                        var voices=(ListBox)typeof(MainForm).GetField("voices",fields).GetValue(form);
+                        var languages=(ComboBox)typeof(MainForm).GetField("languages",fields).GetValue(form);
+                        var text=(TextBox)typeof(MainForm).GetField("text",fields).GetValue(form);
+                        var reset=(Button)typeof(MainForm).GetField("resetSample",fields).GetValue(form);
+                        voices.SelectedItem=voices.Items.Cast<Voice>().First(v=>v.locale=="fr-FR");
+                        Assert(text.Text.StartsWith("Bonjour !",StringComparison.Ordinal));
+                        text.Text="Keep this";
+                        languages.SelectedItem=languages.Items.Cast<LanguageChoice>().First(v=>v.Locale=="es-ES");
+                        Assert(text.Text=="Keep this");
+                        typeof(Button).GetMethod("OnClick",fields).Invoke(reset,new object[]{EventArgs.Empty});
+                        Assert(text.Text.StartsWith("\u00a1Hola!",StringComparison.Ordinal));
+                        languages.SelectedIndex=0;
+                        voices.SelectedItem=voices.Items.Cast<Voice>().First(v=>v.locale=="pt-BR");
+                        Assert(text.Text.StartsWith("Ol\u00e1!",StringComparison.Ordinal));
+                    }
+                } finally {folderField.SetValue(null,originalFolder);dataField.SetValue(null,originalData);}
+            });
             Test("neutral controls use 50",()=>Assert(new Preferences().Rate==50 && new Preferences().Pitch==50));
             Test("legacy settings retain effective controls",()=>{
                 var old=Parse("{\"Rate\":5,\"Pitch\":-5,\"Volume\":80,\"Voice\":\"saved\"}");

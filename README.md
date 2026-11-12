@@ -7,6 +7,11 @@ server or first-use download required.
 
 ## Changelog
 
+### 1.0.3
+
+- Import compatible Phonon voice files and use them in 32-bit and 64-bit SAPI applications.
+- Preview samples follow the selected language without replacing your own text.
+
 ### 1.0.1
 
 - Improved speech-generation efficiency on CPU and GPU without changing the model or voice data.
@@ -36,6 +41,17 @@ and other applications may order them differently.
 Open **Phonon SAPI** from the Start menu to preview voices, choose GPU acceleration,
 read this manual or check for updates. Language filters the application's list;
 it does not translate text. Other SAPI applications list the voices individually.
+The preview sample follows the selected voice's language. Your own text stays
+in the box when you switch voices. **Reset Sample** restores the example for the
+selected voice.
+
+Open **Manage Imported Voices** to find all your imports in one list. Use
+**Add Voice** to choose a compatible `.safetensors` file, then give it a name
+and select its language. Phonon keeps a copy for your Windows account and leaves
+the original file alone. Select the import and use **Remove Voice** to
+remove that copy. Reopen other speech applications if their voice list has not
+refreshed. If an application still holds a removed voice open, Phonon uses a
+built-in voice until you select another one.
 The speaking rate and volume are normally controlled by the reading application;
 pitch is supported through SAPI XML. Audio uses that application's selected
 SAPI output device or file, not a separate Phonon playback device.

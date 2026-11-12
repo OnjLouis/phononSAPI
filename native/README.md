@@ -22,6 +22,12 @@ sampling defaults. The source and patches must
 be retained when rebuilding the native DLL. The matching LLVM libunwind runtime
 is required beside `ptts_ffi.dll` under `runtime`.
 
+Apply `ptts-voice-import.patch` after the performance patch to add the shared
+bounded voice validator and import selection exports. This native patch is
+MIT OR Apache-2.0. The Windows installer registers one read-only imported
+voice enumerator in each registry view; individual imports do not write
+machine-wide registrations.
+
 CMake retrieves exactly two Sonic source files from revision
 `b93885dcb70aae50c6f76b0fe4e0868f029a077e` and verifies their SHA-256 hashes.
 Sonic is Apache-2.0; retain its original licence and notices. Application and
