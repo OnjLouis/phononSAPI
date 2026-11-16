@@ -7,6 +7,11 @@ server or first-use download required.
 
 ## Changelog
 
+### 1.0.5
+
+- The fastest settings in SAPI applications now speak faster. The default
+  speed, slower rates and lower speed increases are unchanged.
+
 ### 1.0.4
 
 - Check for updates with Shift+F1. The shortcut is announced separately from the button name.

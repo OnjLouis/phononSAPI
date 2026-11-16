@@ -6,6 +6,9 @@ int wmain() {
     phonon::Request r;
     r.textBytes = 12; r.voiceBytes = 5; r.languageBytes = 2;
     assert(phonon::valid(r));
+    r.speed = 5; assert(phonon::valid(r));
+    r.speed = 5.01f; assert(!phonon::valid(r));
+    r.speed = 1;
     r.textBytes = 0; assert(!phonon::valid(r));
     r.textBytes = phonon::MaxText + 1; assert(!phonon::valid(r));
     r.textBytes = 12; r.speed = std::numeric_limits<float>::quiet_NaN();

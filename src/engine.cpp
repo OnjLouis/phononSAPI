@@ -165,7 +165,12 @@ class Engine final : public ISpTTSEngine, public ISpObjectWithToken {
         request.textBytes = static_cast<uint32_t>(input.size());
         request.voiceBytes = static_cast<uint32_t>(speaker.size());
         request.languageBytes = static_cast<uint32_t>(locale.size());
-        request.speed = std::clamp(std::pow(2.f, (rate + state.RateAdj) / 5.f), .25f, 4.f);
+        const float steps = static_cast<float>(rate) + state.RateAdj;
+        constexpr float doubleSpeedStep = 5.f;
+        // Preserve the existing curve through double speed and widen the upper half.
+        request.speed = steps <= doubleSpeedStep
+            ? std::max(.25f, std::exp2(steps / doubleSpeedStep))
+            : 2.f * std::pow(MaxSpeed / 2.f, std::min(1.f, (steps - doubleSpeedStep) / doubleSpeedStep));
         request.pitch = std::clamp(std::pow(2.f, state.PitchAdj.MiddleAdj / 12.f), .5f, 2.f);
         request.volume = std::clamp(state.Volume / 100.f,0.f,1.f);
         request.gpu = gpu != 0;

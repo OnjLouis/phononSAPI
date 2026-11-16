@@ -78,6 +78,11 @@ int wmain(int argc, wchar_t** argv) {
     reset(); check(voice->SetRate(5),"Set rate");
     check(voice->Speak(L"This is Phonon speaking through the Microsoft speech interface.",SPF_IS_NOT_XML,nullptr),"Fast speech");
     auto fast = size(); if(fast >= got * .8 || fast < 1000) return 6;
+    reset(); check(voice->SetRate(10),"Set maximum rate");
+    check(voice->Speak(L"This is Phonon speaking through the Microsoft speech interface.",SPF_IS_NOT_XML,nullptr),"Maximum rate speech");
+    auto fastest = size();
+    std::printf("Rate PCM bytes: normal=%llu fast=%llu maximum=%llu\n", got + 0ULL, fast, fastest);
+    bool fastEnough = fastest < fast && fastest >= 1000;
     reset(); check(voice->SetRate(0),"Reset rate"); check(voice->SetVolume(0),"Mute");
     check(voice->Speak(L"This speech should be silent.",SPF_IS_NOT_XML,nullptr),"Muted speech");
     std::vector<short> muted(static_cast<size_t>(size())/2); memory->Seek(zero,STREAM_SEEK_SET,nullptr);
@@ -163,5 +168,5 @@ int wmain(int argc, wchar_t** argv) {
     RegDeleteTreeW(HKEY_CURRENT_USER,key.c_str());
     CoUninitialize(); FreeLibrary(dll);
     std::printf("{\"voice_changes\":24,\"handles_before\":%lu,\"handles_after\":%lu,\"bounded_handles\":%s,\"unload_cleaned_hosts\":%s}\n",handlesBefore,handlesAfter,bounded?"true":"false",cleaned?"true":"false");
-    return reused && isolated && cleaned && bounded ? 0 : 14;
+    return reused && isolated && cleaned && bounded && fastEnough ? 0 : 14;
 }

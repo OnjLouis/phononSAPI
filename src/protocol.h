@@ -11,6 +11,7 @@ constexpr uint32_t Magic = 0x31534850;
 constexpr uint32_t MaxText = 16384;
 constexpr uint32_t MaxFrame = 1024 * 1024;
 constexpr uint32_t SampleRate = 24000;
+constexpr float MaxSpeed = 5.f;
 enum class Frame : uint32_t { Audio = 1, Done = 2, Error = 3 };
 struct Request {
     uint32_t magic = Magic;
@@ -29,7 +30,7 @@ static_assert(sizeof(Response) == 12);
 inline bool valid(const Request& r) {
     return r.magic == Magic && r.textBytes && r.textBytes <= MaxText &&
         r.voiceBytes && r.voiceBytes <= 512 && r.languageBytes &&
-        r.languageBytes <= 8 && r.speed >= .25f && r.speed <= 4 &&
+        r.languageBytes <= 8 && r.speed >= .25f && r.speed <= MaxSpeed &&
         r.pitch >= .5f && r.pitch <= 2 && r.volume >= 0 && r.volume <= 1 && r.gpu <= 1;
 }
 inline bool readExact(HANDLE file, void* buffer, size_t bytes) {
