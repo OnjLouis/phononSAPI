@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(PhononSAPI VERSION 1.0.5 LANGUAGES C CXX)
+project(PhononSAPI VERSION 1.0.8 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT WIN32)
@@ -43,7 +43,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   add_executable(PhononHost src/host.cpp "${SONIC_DIR}/sonic.c")
   target_include_directories(PhononHost PRIVATE "${SONIC_DIR}")
   target_compile_definitions(PhononHost PRIVATE _WIN32_WINNT=0x0A00)
-  target_link_libraries(PhononHost PRIVATE ole32 uuid shell32)
+  target_link_libraries(PhononHost PRIVATE ole32 uuid shell32 advapi32)
   if(MINGW)
     target_link_options(PhononHost PRIVATE -static -municode)
   endif()
@@ -63,4 +63,29 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     DEPENDS src/Manager.cs src/WindowsInstaller.cs src/RestartUpdate.cs src/CooperativeUpdate.cs src/ImportedVoices.cs VERBATIM)
   add_custom_target(PhononSettings ALL DEPENDS "${CMAKE_BINARY_DIR}/PhononSAPI.exe")
   configure_file(src/PhononSAPI.exe.config "${CMAKE_BINARY_DIR}/PhononSAPI.exe.config" COPYONLY)
+  set(PHONON_SETUP_MSI "" CACHE FILEPATH "MSI to embed in the Phonon setup application")
+  set(PHONON_SETUP_MANIFEST "" CACHE FILEPATH "Optional signed update metadata for that MSI")
+  if(PHONON_SETUP_MSI)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PHONON_SETUP_MSI}")
+    file(SHA256 "${PHONON_SETUP_MSI}" SETUP_HASH)
+    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/Setup.sha256" CONTENT "${SETUP_HASH}")
+    set(SETUP_RESOURCES "/resource:${PHONON_SETUP_MSI},PhononSetup.msi"
+        "/resource:${CMAKE_BINARY_DIR}/Setup.sha256,PhononSetup.sha256")
+    set(SETUP_DEPENDS "${PHONON_SETUP_MSI}" "${CMAKE_BINARY_DIR}/Setup.sha256")
+    if(PHONON_SETUP_MANIFEST)
+      list(APPEND SETUP_RESOURCES "/resource:${PHONON_SETUP_MANIFEST},PhononSetup.update.json")
+      list(APPEND SETUP_DEPENDS "${PHONON_SETUP_MANIFEST}")
+    endif()
+    add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/Phonon-SAPI-Setup.exe"
+      COMMAND "${CSC}" /nologo /target:winexe /platform:x64 /optimize+ /main:PhononSapi.Setup
+        "/out:${CMAKE_BINARY_DIR}/Phonon-SAPI-Setup.exe"
+        "/win32manifest:${CMAKE_SOURCE_DIR}/installer/Setup.manifest" ${SETUP_RESOURCES}
+        /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll
+        /r:System.Net.Http.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:Microsoft.CSharp.dll
+        "${MANAGER_SOURCE}" "${INSTALLER_SOURCE}" "${RESTART_UPDATE_SOURCE}"
+        "${COOPERATIVE_UPDATE_SOURCE}" "${IMPORT_SOURCE}" "${CMAKE_SOURCE_DIR}/src/Setup.cs"
+      DEPENDS src/Manager.cs src/WindowsInstaller.cs src/RestartUpdate.cs src/CooperativeUpdate.cs src/ImportedVoices.cs
+        src/Setup.cs installer/Setup.manifest ${SETUP_DEPENDS} VERBATIM)
+    add_custom_target(PhononSetup ALL DEPENDS "${CMAKE_BINARY_DIR}/Phonon-SAPI-Setup.exe")
+  endif()
 endif()

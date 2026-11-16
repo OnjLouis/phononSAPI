@@ -22,6 +22,14 @@ namespace PhononSapi {
         static void Reject(Action test){bool rejected=false;try{test();}catch{rejected=true;}Assert(rejected);}
         static string Url(string version){return "https://github.com/OnjLouis/phononSAPI/releases/download/v"+version+"/Phonon-SAPI-"+version+".msi";}
         public static int Main(string[] args) {
+            Assert(App.ParsePreferences("{}").PauseLength==0);
+            Assert(!App.ParsePreferences("{}").PlayOnVoiceChange);
+            Assert(App.ParsePreferences(App.Json.Serialize(new Preferences{PlayOnVoiceChange=true})).PlayOnVoiceChange);
+            Assert(App.ParsePreferences("{\"PauseLength\":-1}").PauseLength==0);
+            Assert(App.ParsePreferences("{\"PauseLength\":3}").PauseLength==0);
+            foreach(int pause in new[]{0,1,2}) {
+                Assert(App.ParsePreferences(App.Json.Serialize(new Preferences{PauseLength=pause})).PauseLength==pause);
+            }
             string folder=Path.GetFullPath(args[0]);
             Assert(Installer.SafePath(folder,"model/config.json").StartsWith(folder));
             foreach(string path in new[]{"../escape","/absolute","C:/file","model\\config.json","a/../file","a//file","a/./file"})Reject(()=>Installer.SafePath(folder,path));

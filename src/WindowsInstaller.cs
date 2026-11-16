@@ -184,9 +184,9 @@ namespace PhononSapi {
             if(process==null)throw new IOException("Windows Installer could not be started.");
             return process;
         }
-        static Process StartInstall(string path) {return Start("/i \""+Path.GetFullPath(path)+"\" /qb+");}
+        static Process StartInstall(string path,bool quiet=false) {return Start("/i \""+Path.GetFullPath(path)+"\" "+(quiet?"/qn":"/qb+"));}
         internal static void Install(string path) {using(StartInstall(path)){} }
-        internal static int InstallAndWait(string path) {using(var process=StartInstall(path)){process.WaitForExit();return process.ExitCode;} }
+        internal static int InstallAndWait(string path,bool quiet=false) {using(var process=StartInstall(path,quiet)){process.WaitForExit();return process.ExitCode;} }
         internal static void Maintenance(bool remove) {using(Start((remove?"/x ":"/fa ")+InstalledProduct())){} }
     }
 }

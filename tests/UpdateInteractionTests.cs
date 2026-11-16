@@ -136,6 +136,13 @@ namespace PhononSapi {
             Require(MainForm.HandleUpdateShortcut(Keys.Shift|Keys.F1,check) && checks==1,"Shift+F1 did not invoke the update check");
             Require(!MainForm.HandleUpdateShortcut(Keys.F1,check) &&
                 !MainForm.HandleUpdateShortcut(Keys.Control|Keys.Shift|Keys.F1,check) && checks==1,"Other keys must keep their normal behavior");
+            int plays=0,resets=0;
+            Require(MainForm.HandlePreviewShortcut(Keys.Control|Keys.T,()=>plays++,()=>resets++) && plays==1 && resets==0,
+                "Ctrl+T must play");
+            Require(MainForm.HandlePreviewShortcut(Keys.Control|Keys.R,()=>plays++,()=>resets++) && plays==1 && resets==1,
+                "Ctrl+R must reset");
+            Require(!MainForm.HandlePreviewShortcut(Keys.Control|Keys.Shift|Keys.R,()=>plays++,()=>resets++) &&
+                !MainForm.HandlePreviewShortcut(Keys.T,()=>plays++,()=>resets++),"Unrelated shortcuts must pass through");
             Type buttonType=typeof(MainForm).Assembly.GetType("PhononSapi.UpdateCheckButton");
             Require(buttonType!=null,"Update button does not expose its keyboard shortcut");
             using(var button=(Button)Activator.CreateInstance(buttonType,true)) {

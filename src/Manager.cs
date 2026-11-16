@@ -19,8 +19,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Phonon SAPI")]
-[assembly: AssemblyVersion("1.0.5.0")]
-[assembly: AssemblyFileVersion("1.0.5.0")]
+[assembly: AssemblyVersion("1.0.8.0")]
+[assembly: AssemblyFileVersion("1.0.8.0")]
 
 namespace PhononSapi {
     public sealed class Voice {
@@ -47,12 +47,15 @@ namespace PhononSapi {
         public int Rate = 50;
         public int Pitch = 50;
         public int Volume = 100;
+        public int PauseLength;
+        public bool PlayOnVoiceChange;
     }
     public static class App {
-        public const string Version = "1.0.5";
+        public const string Version = "1.0.8";
         internal const string UpgradeCode = "{7688E43D-5355-50FC-AFF3-541E76F34049}";
         internal const string SoftwareUrl = "https://onj.me/software";
         internal const string DonationUrl = "https://onj.me/donate";
+        internal const string GradiumUrl = "https://gradium.ai/";
         public const string ClassId = "{5261CA16-3C40-4AD8-8EC6-4D4650485341}";
         public const string ProductKey = @"Software\Onj\PhononSAPI";
         public const string Tokens = @"SOFTWARE\Microsoft\Speech\Voices\Tokens";
@@ -85,7 +88,9 @@ namespace PhononSapi {
             }
             result.ControlScale=2;
             result.Rate=Math.Max(0,Math.Min(100,result.Rate));result.Pitch=Math.Max(0,Math.Min(100,result.Pitch));
-            result.Volume=Math.Max(0,Math.Min(100,result.Volume));return result;
+            result.Volume=Math.Max(0,Math.Min(100,result.Volume));
+            if(result.PauseLength<0 || result.PauseLength>2)result.PauseLength=0;
+            return result;
         }
         internal static int ToSapiControl(int percent) {
             return (int)Math.Round((Math.Max(0,Math.Min(100,percent))-50)/5.0,MidpointRounding.AwayFromZero);
@@ -118,7 +123,10 @@ namespace PhononSapi {
             File.WriteAllText(temp,Json.Serialize(p),new UTF8Encoding(false));
             if (File.Exists(PreferencesFile)) File.Replace(temp,PreferencesFile,null);
             else File.Move(temp,PreferencesFile);
-            using (var key = Registry.CurrentUser.CreateSubKey(ProductKey)) key.SetValue("UseGpu",p.Gpu ? 1 : 0,RegistryValueKind.DWord);
+            using (var key = Registry.CurrentUser.CreateSubKey(ProductKey)) {
+                key.SetValue("UseGpu",p.Gpu ? 1 : 0,RegistryValueKind.DWord);
+                key.SetValue("PauseLength",p.PauseLength,RegistryValueKind.DWord);
+            }
         }
         public static List<Voice> Voices(string folder) {
             var voices = Json.Deserialize<List<Voice>>(File.ReadAllText(Path.Combine(folder,"voices.json")));
@@ -373,18 +381,21 @@ namespace PhononSapi {
         readonly ListBox voices=new ListBox();
         readonly TextBox text=new TextBox {Multiline=true,ScrollBars=ScrollBars.Vertical};
         readonly PreviewSample preview=new PreviewSample();
-        readonly Button resetSample=new Button {Text="Reset Sampl&e",AutoSize=true};
+        readonly Button resetSample=new PreviewButton("Reset Sample","Ctrl+R");
         readonly Button manageVoices=new Button {Text="&Manage Imported Voices...",AutoSize=true};
         bool synchronizingPreview;
+        bool refreshingVoices, voiceChangesEnabled;
+        readonly CheckBox playOnVoiceChange=new CheckBox {Text="Pla&y when voice changes",AutoSize=true};
         readonly NumericUpDown rate=new NumericUpDown {Minimum=0,Maximum=100,Increment=5};
         readonly NumericUpDown pitch=new NumericUpDown {Minimum=0,Maximum=100,Increment=5};
         readonly NumericUpDown volume=new NumericUpDown {Minimum=0,Maximum=100,Value=100};
+        readonly ComboBox pauseLength=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList};
         readonly CheckBox gpu=new CheckBox {Text="Use &GPU acceleration",AutoSize=true};
         readonly ComboBox interval=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList};
         readonly Label status=new Label {AutoSize=true,Text="Ready",AccessibleName="Status"};
         readonly TextBox backend=new TextBox {ReadOnly=true,Text="Not initialized."};
         DiagnosticsDialog diagnosticsWindow;
-        readonly Button play=new Button {Text="&Play"}, stop=new Button {Text="&Stop"}, check=new UpdateCheckButton();
+        readonly Button play=new PreviewButton("Play","Ctrl+T"), stop=new Button {Text="&Stop"}, check=new UpdateCheckButton();
         dynamic speech;
         bool checking;
         readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer {Interval=60000};
@@ -400,9 +411,14 @@ namespace PhononSapi {
             Add(layout,"&Language:",languages); languages.Items.Add(new LanguageChoice());
             languages.Items.AddRange(catalogue.Select(v=>v.locale).Distinct().Select(x=>new LanguageChoice{Locale=x}).Cast<object>().ToArray());
             Add(layout,"&Voice:",voices); voices.Height=160;
+            playOnVoiceChange.Checked=preferences.PlayOnVoiceChange;
+            Add(layout,"",playOnVoiceChange);
             Add(layout,"",manageVoices);
             Add(layout,"Te&xt:",text); text.Height=100;
             Add(layout,"&Rate:",rate); Add(layout,"Pi&tch:",pitch); Add(layout,"V&olume:",volume);
+            Add(layout,"Pa&use length:",pauseLength);
+            pauseLength.Items.AddRange(new object[]{"Default","Shorter","Longer"});
+            pauseLength.SelectedIndex=preferences.PauseLength;
             rate.Value=preferences.Rate;
             pitch.Value=preferences.Pitch;
             volume.Value=Math.Max(0,Math.Min(100,preferences.Volume));
@@ -420,17 +436,19 @@ namespace PhononSapi {
             var websites=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill};
             var software=new Button {Text="Soft&ware catalogue",AutoSize=true,Tag=App.SoftwareUrl};
             var donate=new Button {Text="Do&nate",AutoSize=true,Tag=App.DonationUrl};
-            websites.Controls.AddRange(new Control[]{software,donate});Add(layout,"",websites);Add(layout,"",status);
+            var gradium=new Button {Text="Phonon &from Gradium",AutoSize=true};
+            websites.Controls.AddRange(new Control[]{gradium,software,donate});Add(layout,"",websites);Add(layout,"",status);
+            gradium.Click+=(s,e)=>OpenWebsite(App.GradiumUrl);
             software.Click+=(s,e)=>OpenWebsite(App.SoftwareUrl);donate.Click+=(s,e)=>OpenWebsite(App.DonationUrl);
             text.TextChanged+=(s,e)=>{if(!synchronizingPreview)preview.Edit(text.Text);};
             resetSample.Click+=(s,e)=>{Stop();preview.Reset(PreviewLocale());UpdatePreview();};
             languages.SelectedIndexChanged+=(s,e)=>RefreshVoices(); languages.SelectedIndex=0;
             gpu.CheckedChanged+=(s,e)=>Save(); interval.SelectedIndexChanged+=(s,e)=>Save();
             rate.ValueChanged+=(s,e)=>Save(); pitch.ValueChanged+=(s,e)=>Save(); volume.ValueChanged+=(s,e)=>Save();
-            voices.SelectedIndexChanged+=(s,e)=>{
-                if(voices.SelectedItem is Voice)FollowPreview();
-                Save();
-            };
+            pauseLength.SelectedIndexChanged+=(s,e)=>Save();
+            voices.SelectedIndexChanged+=(s,e)=>{if(!refreshingVoices)VoiceChanged();};
+            playOnVoiceChange.CheckedChanged+=(s,e)=>Save();
+            voiceChangesEnabled=true;
             manageVoices.Click+=(s,e)=>ManageVoices();
             play.Click+=(s,e)=>Play(); stop.Click+=(s,e)=>Stop();
             install.Click+=(s,e)=>Maintenance(false); remove.Click+=(s,e)=>Maintenance(true);
@@ -449,7 +467,13 @@ namespace PhononSapi {
             MessageBox.Show(this,notice,"Phonon SAPI update",MessageBoxButtons.OK,MessageBoxIcon.Information);
         }
         protected override bool ProcessCmdKey(ref Message msg,Keys keyData) {
-            return HandleUpdateShortcut(keyData,check.PerformClick) || base.ProcessCmdKey(ref msg,keyData);
+            return HandlePreviewShortcut(keyData,play.PerformClick,resetSample.PerformClick) ||
+                HandleUpdateShortcut(keyData,check.PerformClick) || base.ProcessCmdKey(ref msg,keyData);
+        }
+        internal static bool HandlePreviewShortcut(Keys keyData,Action play,Action reset) {
+            if(keyData==(Keys.Control|Keys.T)) {play();return true;}
+            if(keyData==(Keys.Control|Keys.R)) {reset();return true;}
+            return false;
         }
         internal static bool HandleUpdateShortcut(Keys keyData,Action checkNow) {
             if(keyData!=UpdateCheckButton.ShortcutKeys)return false;
@@ -469,13 +493,27 @@ namespace PhononSapi {
             try {available.AddRange(imports.List());}
             catch(IOException error){App.Log(error.Message);}
             catch(UnauthorizedAccessException error){App.Log(error.Message);}
-            voices.BeginUpdate(); voices.Items.Clear();
-            var language=languages.SelectedItem as LanguageChoice;
-            voices.Items.AddRange(available.Where(v=>language==null || language.Locale==null || v.locale==language.Locale).Cast<object>().ToArray());
-            voices.SelectedItem=voices.Items.Cast<Voice>().FirstOrDefault(v=>v.id==name);
-            if(voices.SelectedIndex<0 && voices.Items.Count>0) voices.SelectedIndex=0;
-            voices.EndUpdate();
+            refreshingVoices=true;
+            voices.BeginUpdate();
+            try {
+                voices.Items.Clear();
+                var language=languages.SelectedItem as LanguageChoice;
+                voices.Items.AddRange(available.Where(v=>language==null || language.Locale==null || v.locale==language.Locale).Cast<object>().ToArray());
+                voices.SelectedItem=voices.Items.Cast<Voice>().FirstOrDefault(v=>v.id==name);
+                if(voices.SelectedIndex<0 && voices.Items.Count>0) voices.SelectedIndex=0;
+            } finally {
+                voices.EndUpdate();
+                refreshingVoices=false;
+            }
+            var current=voices.SelectedItem as Voice;
+            if((current==null?null:current.id)!=(selected==null?null:selected.id)) VoiceChanged();
+            else FollowPreview();
+        }
+        void VoiceChanged() {
             FollowPreview();
+            if(!voiceChangesEnabled)return;
+            Save();
+            if(playOnVoiceChange.Checked)Play();
         }
         void ManageVoices() {
             Stop();
@@ -511,6 +549,8 @@ namespace PhononSapi {
         void Save() {
             preferences.Gpu=gpu.Checked; preferences.Interval=new[]{"never","hourly","daily"}[Math.Max(0,interval.SelectedIndex)];
             preferences.Rate=(int)rate.Value;preferences.Pitch=(int)pitch.Value;preferences.Volume=(int)volume.Value;
+            preferences.PauseLength=Math.Max(0,pauseLength.SelectedIndex);
+            preferences.PlayOnVoiceChange=playOnVoiceChange.Checked;
             var selected=voices.SelectedItem as Voice; if(selected!=null) preferences.Voice=selected.id;
             try {App.Save(preferences);} catch(Exception error) {App.Log(error.Message);}
         }
@@ -597,6 +637,19 @@ namespace PhononSapi {
         }
     }
 
+    internal sealed class PreviewButton : Button {
+        readonly string shortcut;
+        internal PreviewButton(string label,string shortcut) {
+            Text=label;this.shortcut=shortcut;AutoSize=true;AccessibleRole=AccessibleRole.PushButton;
+        }
+        protected override AccessibleObject CreateAccessibilityInstance() {return new PreviewAccessibleObject(this);}
+        sealed class PreviewAccessibleObject : ControlAccessibleObject {
+            readonly PreviewButton button;
+            internal PreviewAccessibleObject(PreviewButton button):base(button){this.button=button;}
+            public override string KeyboardShortcut {get{return button.shortcut;}}
+        }
+    }
+
     internal sealed class UpdateCheckButton : Button {
         internal const Keys ShortcutKeys=Keys.Shift|Keys.F1;
         public UpdateCheckButton() {Text="Check for updates";AccessibleRole=AccessibleRole.PushButton;}
@@ -611,7 +664,7 @@ namespace PhononSapi {
 
     internal static class UpdatePreflight {
         internal static async Task<UpdateChoice> Check(IWin32Window owner,string installRoot,Action<string> status,Action<string> log,CancellationToken cancellation,bool allowRestart,
-            Action<WindowsInstaller.ResourceUser[]> approveClose=null) {
+            Action<WindowsInstaller.ResourceUser[]> approveClose=null,bool setup=false) {
             int pid;
             using(var process=Process.GetCurrentProcess())pid=process.Id;
             while(!cancellation.IsCancellationRequested) {
@@ -627,7 +680,8 @@ namespace PhononSapi {
                 if(cancellation.IsCancellationRequested)return UpdateChoice.Cancel;
                 message+="\n\nIf your screen reader is listed, switch it to a different voice and keep it running. Save your work, close the other listed applications, then choose Retry.";
                 if(canClose)message+="\n\nClose apps and update asks Windows to close and reopen the listed apps for you. Save your work first.";
-                DialogResult decision=allowRestart?ShowRestartChoices(owner,message,canClose):MessageBox.Show(owner,message,"Phonon SAPI update blocked",MessageBoxButtons.RetryCancel,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2);
+                DialogResult decision;
+                using(var dialog=CreateRestartChoices(message,canClose,allowRestart,setup))decision=dialog.ShowDialog(owner);
                 if(decision==DialogResult.Yes)return UpdateChoice.InstallAtRestart;
                 if(decision==DialogResult.OK && canClose){approveClose(users);return UpdateChoice.CloseAppsAndInstall;}
                 if(decision!=DialogResult.Retry) {
@@ -637,21 +691,20 @@ namespace PhononSapi {
             }
             return UpdateChoice.Cancel;
         }
-        static DialogResult ShowRestartChoices(IWin32Window owner,string message,bool canClose) {
-            using(var dialog=CreateRestartChoices(message,canClose))return dialog.ShowDialog(owner);
-        }
-        internal static Form CreateRestartChoices(string message,bool canClose=false) {
-            var dialog=new Form {Text="Phonon SAPI update blocked",StartPosition=FormStartPosition.CenterParent,
+        internal static Form CreateRestartChoices(string message,bool canClose=false,bool allowRestart=true,bool setup=false) {
+            var dialog=new Form {Text=setup?"Phonon SAPI setup":"Phonon SAPI update blocked",StartPosition=FormStartPosition.CenterParent,
                 ClientSize=new Size(550,290),MinimizeBox=false,MaximizeBox=false,ShowInTaskbar=false,FormBorderStyle=FormBorderStyle.FixedDialog};
             var layout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             var details=new TextBox {Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill,
-                AccessibleName="Applications using Phonon",Text=(message+"\n\nChoose Install at next restart to leave all apps running now.").Replace("\n","\r\n")};
+                AccessibleName="Applications using Phonon",Text=(message+
+                    (allowRestart?"\n\nChoose Install at next restart to leave all apps running now.":"")).Replace("\n","\r\n")};
             var buttons=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill};
             var retry=new Button {Text="&Retry",DialogResult=DialogResult.Retry,AutoSize=true};
             var restart=new Button {Text="&Install at next restart",DialogResult=DialogResult.Yes,AutoSize=true};
             var cancel=new Button {Text="Cancel",DialogResult=DialogResult.Cancel,AutoSize=true};
-            buttons.Controls.AddRange(new Control[]{retry,restart});
+            buttons.Controls.Add(retry);
+            if(allowRestart)buttons.Controls.Add(restart);
             if(canClose)buttons.Controls.Add(new Button {Text="&Close apps and update",DialogResult=DialogResult.OK,AutoSize=true});
             buttons.Controls.Add(cancel);
             layout.Controls.Add(details,0,0);layout.Controls.Add(buttons,0,1);dialog.Controls.Add(layout);

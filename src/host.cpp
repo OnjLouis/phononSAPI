@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 #include "SapiImportedVoice.h"
+#include "pause_length.h"
 
 using namespace phonon;
 static void log(const std::string& message) noexcept {
@@ -102,6 +103,14 @@ struct Sink {
     HANDLE cancel;
     sonicStream stream;
     bool failed = false;
+    PauseLength pauses{};
+    std::vector<short> adjusted;
+    static bool appendAdjusted(void* user, const float* audio, size_t count) {
+        auto& sink = *static_cast<Sink*>(user);
+        if (sink.cancelled()) return false;
+        for (size_t i = 0; i < count; ++i) sink.adjusted.push_back(static_cast<short>(audio[i] * 32768.f));
+        return true;
+    }
     bool cancelled() const { return WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0; }
     bool send(const short* pcm, size_t count) {
         if (cancelled() || failed) return false;
@@ -112,9 +121,25 @@ struct Sink {
     bool drain() {
         short pcm[4096];
         int count;
-        while ((count = sonicReadShortFromStream(stream, pcm, 4096)) > 0)
-            if (!send(pcm, count)) return false;
+        while ((count = sonicReadShortFromStream(stream, pcm, 4096)) > 0) {
+            if (pauses.mode == PAUSE_DEFAULT) {
+                if (!send(pcm, count)) return false;
+                continue;
+            }
+            float samples[4096];
+            for (int i = 0; i < count; ++i) samples[i] = pcm[i] / 32768.f;
+            adjusted.clear();
+            if (!pause_push(&pauses, samples, count, appendAdjusted, this) ||
+                (!adjusted.empty() && !send(adjusted.data(), adjusted.size()))) return false;
+        }
         return !cancelled();
+    }
+    bool finish() {
+        if (!sonicFlushStream(stream) || !drain()) return false;
+        if (pauses.mode == PAUSE_DEFAULT) return true;
+        adjusted.clear();
+        return pause_finish(&pauses, appendAdjusted, this) &&
+            (adjusted.empty() || send(adjusted.data(), adjusted.size()));
     }
     static bool callback(const float* pcm, size_t count, void* user) {
         auto& self = *static_cast<Sink*>(user);
@@ -157,11 +182,17 @@ int wmain(int argc, wchar_t** argv) {
                 sonicSetSpeed(stream, request.speed); sonicSetPitch(stream, request.pitch);
                 sonicSetVolume(stream, request.volume);
                 Sink sink{output, cancel, stream};
+                DWORD pause = 0, size = sizeof(pause);
+                if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Onj\\PhononSAPI", L"PauseLength",
+                        RRF_RT_REG_DWORD, nullptr, &pause, &size) == ERROR_SUCCESS &&
+                    (pause == PAUSE_SHORTER || pause == PAUSE_LONGER) && request.volume != 0) {
+                    sink.pauses.mode = static_cast<PauseMode>(pause);
+                }
                 Result result{};
                 bool success = !sink.cancelled() && native.speak(native.engine, text.c_str(), Sink::callback, &sink, &result);
                 if (!sink.cancelled()) {
                     if (!success || sink.failed) throw std::runtime_error("Speech generation failed");
-                    if (!sonicFlushStream(stream) || !sink.drain()) throw std::runtime_error("Audio processing failed");
+                    if (!sink.finish()) throw std::runtime_error("Audio processing failed");
                 }
             } catch (const std::exception& error) {
                 log(error.what());

@@ -7,6 +7,13 @@ server or first-use download required.
 
 ## Changelog
 
+### 1.0.8
+
+- Choose shorter or longer pauses in Phonon speech from the settings app.
+- Enable **Play when voice changes** to hear the preview while selecting a voice.
+- Press **Ctrl+T** to play and **Ctrl+R** to reset the sample without leaving the current control.
+- Setup asks before installing and helps you deal with apps that are using Phonon.
+
 ### 1.0.5
 
 - The fastest settings in SAPI applications now speak faster. The default
@@ -40,8 +47,13 @@ processor. Both 32-bit and 64-bit SAPI applications can use the voices. A compat
 graphics driver is recommended; CPU operation is available but may be slower.
 No CUDA toolkit or graphics-driver installer is included.
 
-Run the downloaded **Phonon SAPI .msi** installer and approve the administrator
-prompt. It installs the application, registers the voices and adds a Start menu
+Open the downloaded **Phonon SAPI Setup** and choose **Install** or **Cancel**.
+Administrator permission is requested only after choosing to continue.
+If apps are using Phonon, Setup names them and lets you retry with the same
+download. When all listed apps support safe reopening, you can let Windows close
+and reopen them. Keep your screen reader running. Switch it to another voice
+if it is listed, or choose **Install at next restart** for an upgrade.
+Setup installs the application, registers the voices and adds a Start menu
 shortcut. Your default Windows voice is not changed. Reopen
 your reading application, then choose a voice such as **Elodie-Rose - Phonon
 (English UK)**.
@@ -82,6 +94,9 @@ is using it. No background speech service starts at sign-in.
 
 GPU acceleration is on by default. If GPU initialization fails, the host quietly
 uses CPU synthesis. Changing the GPU option takes effect on the next utterance.
+**Pause length** keeps the original timing with **Default** or adjusts longer
+gaps within speech with **Shorter** or **Longer**. It applies to the next
+utterance in any application using a Phonon SAPI voice.
 **Synthesis backend** reports the actual initialized engine: GPU (Vulkan), CPU
 with GPU disabled, or CPU fallback when GPU initialization was unavailable.
 Before speech has initialized an engine, it reports that no result is available.
@@ -145,7 +160,7 @@ text. The view does not refresh automatically while you read it.
 - [Contact Andre Louis](https://onj.me/contact)
 - [Donate to support development](https://onj.me/donate)
 
-The application also has **Software catalogue** and **Donate** buttons.
+The application also has **Phonon from Gradium**, **Software catalogue** and **Donate** buttons.
 Donations are optional and do not unlock features.
 
 ## Credits And Licences
