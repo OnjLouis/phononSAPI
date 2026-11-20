@@ -28,6 +28,9 @@ MIT OR Apache-2.0. The Windows installer registers one read-only imported
 voice enumerator in each registry view; individual imports do not write
 machine-wide registrations.
 
+Apply `ptts-english-sterling.patch` after the voice-import patch and run the
+English preprocessing tests. It corrects UK currency in the shared runtime.
+
 CMake retrieves exactly two Sonic source files from revision
 `b93885dcb70aae50c6f76b0fe4e0868f029a077e` and verifies their SHA-256 hashes.
 Sonic is Apache-2.0; retain its original licence and notices. Application and

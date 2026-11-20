@@ -7,6 +7,10 @@ server or first-use download required.
 
 ## Changelog
 
+### 1.0.9
+
+- English speech reads UK currency in pounds and pence, including "one penny."
+
 ### 1.0.8
 
 - Choose shorter or longer pauses in Phonon speech from the settings app.
