@@ -19,8 +19,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Phonon SAPI")]
-[assembly: AssemblyVersion("1.0.9.0")]
-[assembly: AssemblyFileVersion("1.0.9.0")]
+[assembly: AssemblyVersion("1.0.10.0")]
+[assembly: AssemblyFileVersion("1.0.10.0")]
 
 namespace PhononSapi {
     public sealed class Voice {
@@ -51,7 +51,7 @@ namespace PhononSapi {
         public bool PlayOnVoiceChange;
     }
     public static class App {
-        public const string Version = "1.0.9";
+        public const string Version = "1.0.10";
         internal const string UpgradeCode = "{7688E43D-5355-50FC-AFF3-541E76F34049}";
         internal const string SoftwareUrl = "https://onj.me/software";
         internal const string DonationUrl = "https://onj.me/donate";
@@ -392,8 +392,9 @@ namespace PhononSapi {
         readonly ComboBox pauseLength=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList};
         readonly CheckBox gpu=new CheckBox {Text="Use &GPU acceleration",AutoSize=true};
         readonly ComboBox interval=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList};
-        readonly Label status=new Label {AutoSize=true,Text="Ready",AccessibleName="Status"};
-        readonly TextBox backend=new TextBox {ReadOnly=true,Text="Not initialized."};
+        readonly Label status=new Label {AutoSize=true,Text="Ready",AccessibleName="Activity"};
+        readonly TextBox backend=new TextBox {ReadOnly=true,Multiline=true,Height=45};
+        int importedCount;
         DiagnosticsDialog diagnosticsWindow;
         readonly Button play=new PreviewButton("Play","Ctrl+T"), stop=new Button {Text="&Stop"}, check=new UpdateCheckButton();
         dynamic speech;
@@ -423,7 +424,8 @@ namespace PhononSapi {
             pitch.Value=preferences.Pitch;
             volume.Value=Math.Max(0,Math.Min(100,preferences.Volume));
             gpu.Checked=preferences.Gpu; Add(layout,"",gpu);
-            Add(layout,"Synthesis &backend:",backend);
+            Add(layout,"Status (&backend and voices):",backend);
+            backend.AccessibleName="Status";
             var buttons=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill};
             buttons.Controls.AddRange(new Control[]{play,stop,resetSample}); Add(layout,"",buttons);
             Add(layout,"Update &check:",interval); interval.Items.AddRange(new object[]{"Never","Hourly","Daily"});
@@ -442,7 +444,7 @@ namespace PhononSapi {
             software.Click+=(s,e)=>OpenWebsite(App.SoftwareUrl);donate.Click+=(s,e)=>OpenWebsite(App.DonationUrl);
             text.TextChanged+=(s,e)=>{if(!synchronizingPreview)preview.Edit(text.Text);};
             resetSample.Click+=(s,e)=>{Stop();preview.Reset(PreviewLocale());UpdatePreview();};
-            languages.SelectedIndexChanged+=(s,e)=>RefreshVoices(); languages.SelectedIndex=0;
+            languages.SelectedIndexChanged+=(s,e)=>{if(!refreshingVoices)RefreshVoices();}; languages.SelectedIndex=0;
             gpu.CheckedChanged+=(s,e)=>Save(); interval.SelectedIndexChanged+=(s,e)=>Save();
             rate.ValueChanged+=(s,e)=>Save(); pitch.ValueChanged+=(s,e)=>Save(); volume.ValueChanged+=(s,e)=>Save();
             pauseLength.SelectedIndexChanged+=(s,e)=>Save();
@@ -493,6 +495,8 @@ namespace PhononSapi {
             try {available.AddRange(imports.List());}
             catch(IOException error){App.Log(error.Message);}
             catch(UnauthorizedAccessException error){App.Log(error.Message);}
+            importedCount=available.Count-catalogue.Count;
+            RefreshBackend();
             refreshingVoices=true;
             voices.BeginUpdate();
             try {
@@ -518,12 +522,16 @@ namespace PhononSapi {
         void ManageVoices() {
             Stop();
             var selected=voices.SelectedItem as Voice;
-            using(var dialog=new ManageImportedVoicesDialog(imports,selected==null?null:selected.id,PreviewLocale())) {
+            using(var dialog=new ManageImportedVoicesDialog(imports,selected==null?null:selected.id)) {
                 dialog.ShowDialog(this);
                 if(dialog.Changed) {
                     var filter=languages.SelectedItem as LanguageChoice;
-                    if(dialog.LastAdded!=null && filter!=null && filter.Locale!=null && filter.Locale!=dialog.LastAddedLocale)
-                        languages.SelectedIndex=0;
+                    var changedLocale=dialog.LastAddedLocale??dialog.EditedLocale(selected==null?null:selected.id);
+                    if(changedLocale!=null && filter!=null && filter.Locale!=null && filter.Locale!=changedLocale) {
+                        refreshingVoices=true;
+                        try {languages.SelectedIndex=0;}
+                        finally {refreshingVoices=false;}
+                    }
                     RefreshVoices(dialog.LastAdded);Save();
                 }
             }
@@ -541,7 +549,11 @@ namespace PhononSapi {
             try {text.Text=preview.Text;}
             finally {synchronizingPreview=false;}
         }
-        void RefreshBackend() {string value=BackendStatus.Current(gpu.Checked);if(backend.Text!=value)backend.Text=value;}
+        void RefreshBackend() {
+            string value="Built-in voices: "+catalogue.Count+". Imported voices: "+importedCount+"."+Environment.NewLine+
+                BackendStatus.Current(gpu.Checked);
+            if(backend.Text!=value)backend.Text=value;
+        }
         void OpenWebsite(string url) {
             try {Process.Start(new ProcessStartInfo(url){UseShellExecute=true});}
             catch(Exception error) {App.Log(error.Message);MessageBox.Show(this,"The website could not be opened in your default browser.","Phonon SAPI",MessageBoxButtons.OK,MessageBoxIcon.Error);}

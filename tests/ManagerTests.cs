@@ -35,6 +35,20 @@ namespace PhononSapi {
             foreach(string path in new[]{"../escape","/absolute","C:/file","model\\config.json","a/../file","a//file","a/./file"})Reject(()=>Installer.SafePath(folder,path));
             Installer.Validate(folder);count++;
             Assert(App.Voices(folder).Count==102);
+            string profile=Path.Combine(Path.GetDirectoryName(folder),"profile-"+Guid.NewGuid().ToString("N"));
+            try {
+                string stock=Path.Combine(folder,"model","voices","Freya.safetensors");
+                var store=new ImportedVoices(profile,folder);
+                var id=store.Add(stock,"Fixture","en-GB");
+                byte[] tensor=store.ReadVoice(store.List().Single());
+                store.ChangeLanguage(id,"fr-FR");
+                Reject(()=>store.ChangeLanguage(id,"ja-JP"));
+                var updated=store.List().Single();
+                Assert(updated.id==id && updated.name=="Fixture" && updated.locale=="fr-FR");
+                Assert(tensor.SequenceEqual(store.ReadVoice(updated)));
+                store.Remove(id);
+                Assert(!store.List().Any());
+            } finally {if(Directory.Exists(profile))Directory.Delete(profile,true);}
             using(var rsa=new RSACryptoServiceProvider(2048)) {
                 rsa.PersistKeyInCsp=false;
                 var key=rsa.ExportParameters(false);

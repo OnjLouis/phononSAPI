@@ -7,6 +7,11 @@ server or first-use download required.
 
 ## Changelog
 
+### 1.0.10
+
+- Preview a voice before importing it. Correct an imported voice's language without replacing it.
+- Status reports built-in and imported voice counts as well as the current speech backend.
+
 ### 1.0.9
 
 - English speech reads UK currency in pounds and pence, including "one penny."
@@ -72,8 +77,11 @@ in the box when you switch voices. **Reset Sample** restores the example for the
 selected voice.
 
 Open **Manage Imported Voices** to find all your imports in one list. Use
-**Add Voice** to choose a compatible `.safetensors` file, then give it a name
-and select its language. Phonon keeps a copy for your Windows account and leaves
+**Add Voice** to choose a compatible `.safetensors` file. Use **Preview Voice**
+to hear it before saving. Preview uses English until you choose a language.
+Give it a name and select its spoken language. If the language is wrong, select
+the import and choose **Change Language**; it remains the same voice in your
+speech applications. Phonon keeps a copy for your Windows account and leaves
 the original file alone. Select the import and use **Remove Voice** to
 remove that copy. Reopen other speech applications if their voice list has not
 refreshed. If an application still holds a removed voice open, Phonon uses a
@@ -101,7 +109,7 @@ uses CPU synthesis. Changing the GPU option takes effect on the next utterance.
 **Pause length** keeps the original timing with **Default** or adjusts longer
 gaps within speech with **Shorter** or **Longer**. It applies to the next
 utterance in any application using a Phonon SAPI voice.
-**Synthesis backend** reports the actual initialized engine: GPU (Vulkan), CPU
+**Status** reports built-in and imported voice counts and the actual initialized engine: GPU (Vulkan), CPU
 with GPU disabled, or CPU fallback when GPU initialization was unavailable.
 Before speech has initialized an engine, it reports that no result is available.
 Different applications can hold independent engines and therefore use additional

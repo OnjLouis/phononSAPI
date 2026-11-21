@@ -150,8 +150,42 @@ struct Sink {
     }
 };
 
+static int preview() {
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE), output = GetStdHandle(STD_OUTPUT_HANDLE);
+    uint32_t count{};
+    char lang[3]{};
+    if (!readExact(input, &count, sizeof(count)) || !count || count > 4 * 1024 * 1024 ||
+        !readExact(input, lang, 2)) return 2;
+    std::vector<uint8_t> bytes(count);
+    if (!readExact(input, bytes.data(), bytes.size()) ||
+        !readExact(input, &count, sizeof(count)) || !count || count > 512) return 2;
+    std::string text(count, '\0');
+    if (!readExact(input, text.data(), count) || text.find('\0') != std::string::npos) return 2;
+    Native native;
+    native.load();
+    native.open(false);
+    if (!native.importVoice(native.engine, bytes.data(), bytes.size()) ||
+        !native.language(native.engine, lang)) return 3;
+    struct Audio { HANDLE output; size_t frames = 0; } audio{output};
+    auto sink = [](const float* pcm, size_t size, void* user) -> bool {
+        auto& audio = *static_cast<Audio*>(user);
+        if (size > SampleRate * 20 - audio.frames) return false;
+        audio.frames += size;
+        std::vector<int16_t> samples(size);
+        for (size_t i = 0; i < size; ++i)
+            samples[i] = std::isfinite(pcm[i]) ? static_cast<int16_t>(std::clamp(pcm[i], -1.f, 1.f) * 32767.f) : 0;
+        return writeExact(audio.output, samples.data(), samples.size() * sizeof(samples[0]));
+    };
+    Result result{};
+    return native.speak(native.engine, text.c_str(), sink, &audio, &result) && audio.frames ? 0 : 4;
+}
+
 int wmain(int argc, wchar_t** argv) {
     if (argc != 2) return 2;
+    if (std::wstring(argv[1]) == L"--preview") {
+        try { return preview(); }
+        catch (...) { return 3; }
+    }
     wchar_t* end = nullptr;
     auto value = wcstoull(argv[1], &end, 10);
     if (!value || !end || *end) return 2;
