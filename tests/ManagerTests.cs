@@ -23,6 +23,15 @@ namespace PhononSapi {
         static string Url(string version){return "https://github.com/OnjLouis/phononSAPI/releases/download/v"+version+"/Phonon-SAPI-"+version+".msi";}
         public static int Main(string[] args) {
             Assert(App.ParsePreferences("{}").PauseLength==0);
+            Assert(App.ParsePreferences("{}").VoiceVariation==0);
+            Assert(App.ParsePreferences("{}").GraphicsAdapter=="");
+            Assert(App.ParsePreferences("{\"VoiceVariation\":-1,\"GraphicsAdapter\":\"invalid\"}").VoiceVariation==0);
+            Assert(App.ParsePreferences("{\"VoiceVariation\":3,\"GraphicsAdapter\":\"invalid\"}").GraphicsAdapter=="");
+            const string adapter="0123456789abcdef0123456789abcdef";
+            var graphics=App.ParsePreferences(App.Json.Serialize(new Preferences{GraphicsAdapter=adapter,VoiceVariation=2}));
+            Assert(graphics.GraphicsAdapter==adapter && graphics.VoiceVariation==2);
+            var adapters=GraphicsChoice.Parse("invalid\n"+adapter+"\tDiscrete GPU\n"+adapter+"\tDuplicate\n");
+            Assert(adapters.Length==1 && adapters[0].Id==adapter && adapters[0].Name=="Discrete GPU");
             Assert(!App.ParsePreferences("{}").PlayOnVoiceChange);
             Assert(App.ParsePreferences(App.Json.Serialize(new Preferences{PlayOnVoiceChange=true})).PlayOnVoiceChange);
             Assert(App.ParsePreferences("{\"PauseLength\":-1}").PauseLength==0);

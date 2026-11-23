@@ -7,6 +7,12 @@ server or first-use download required.
 
 ## Changelog
 
+### 1.0.11
+
+- Choose a graphics adapter instead of Automatic. Status identifies the adapter in use.
+- Improved GPU initialization on drivers that offer more than one compatible memory type.
+- Use Voice variation to try less or more expression while leaving the default unchanged.
+
 ### 1.0.10
 
 - Preview a voice before importing it. Correct an imported voice's language without replacing it.
@@ -105,7 +111,12 @@ The model stays ready for faster voice changes while your reading application
 is using it. No background speech service starts at sign-in.
 
 GPU acceleration is on by default. If GPU initialization fails, the host quietly
-uses CPU synthesis. Changing the GPU option takes effect on the next utterance.
+uses CPU synthesis. **Graphics adapter** defaults to **Automatic**. Choose an
+adapter if Windows has more than one or if Automatic picks the wrong one.
+Changes take effect on the next utterance.
+**Voice variation** is experimental. **Default** preserves the original speech.
+**Less** and **More** change how much the model can vary its phrasing and
+intonation. The setting applies to all voices; the difference can be subtle.
 **Pause length** keeps the original timing with **Default** or adjusts longer
 gaps within speech with **Shorter** or **Longer**. It applies to the next
 utterance in any application using a Phonon SAPI voice.

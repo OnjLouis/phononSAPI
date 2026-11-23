@@ -31,6 +31,13 @@ machine-wide registrations.
 Apply `ptts-english-sterling.patch` after the voice-import patch and run the
 English preprocessing tests. It corrects UK currency in the shared runtime.
 
+Apply `ptts-vulkan-adapters.patch` after the existing Vulkan and runtime
+patches, then apply `ptts-temperature.patch`. Build the shared runtime with
+`vulkan-adapters` enabled. It lists and selects adapters, retries compatible
+mapped memory types after an allocation failure, and exposes the sampling
+temperature backported from [upstream PR 314](https://github.com/gradium-ai/xn-ptts/pull/314)
+by David Blum. Neither the model nor the default temperature changes.
+
 CMake retrieves exactly two Sonic source files from revision
 `b93885dcb70aae50c6f76b0fe4e0868f029a077e` and verifies their SHA-256 hashes.
 Sonic is Apache-2.0; retain its original licence and notices. Application and

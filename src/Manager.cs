@@ -19,8 +19,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Phonon SAPI")]
-[assembly: AssemblyVersion("1.0.10.0")]
-[assembly: AssemblyFileVersion("1.0.10.0")]
+[assembly: AssemblyVersion("1.0.11.0")]
+[assembly: AssemblyFileVersion("1.0.11.0")]
 
 namespace PhononSapi {
     public sealed class Voice {
@@ -39,6 +39,8 @@ namespace PhononSapi {
     }
     public sealed class Preferences {
         public bool Gpu = true;
+        public string GraphicsAdapter = "";
+        public int VoiceVariation;
         public string Interval = "daily";
         public DateTime LastCheck = DateTime.MinValue;
         public string LastStartupUpdateNotice = "";
@@ -51,7 +53,7 @@ namespace PhononSapi {
         public bool PlayOnVoiceChange;
     }
     public static class App {
-        public const string Version = "1.0.10";
+        public const string Version = "1.0.11";
         internal const string UpgradeCode = "{7688E43D-5355-50FC-AFF3-541E76F34049}";
         internal const string SoftwareUrl = "https://onj.me/software";
         internal const string DonationUrl = "https://onj.me/donate";
@@ -90,6 +92,8 @@ namespace PhononSapi {
             result.Rate=Math.Max(0,Math.Min(100,result.Rate));result.Pitch=Math.Max(0,Math.Min(100,result.Pitch));
             result.Volume=Math.Max(0,Math.Min(100,result.Volume));
             if(result.PauseLength<0 || result.PauseLength>2)result.PauseLength=0;
+            if(result.VoiceVariation<0 || result.VoiceVariation>2)result.VoiceVariation=0;
+            if(!GraphicsChoice.ValidId(result.GraphicsAdapter))result.GraphicsAdapter="";
             return result;
         }
         internal static int ToSapiControl(int percent) {
@@ -124,7 +128,9 @@ namespace PhononSapi {
             if (File.Exists(PreferencesFile)) File.Replace(temp,PreferencesFile,null);
             else File.Move(temp,PreferencesFile);
             using (var key = Registry.CurrentUser.CreateSubKey(ProductKey)) {
+                key.SetValue("GraphicsAdapter",p.GraphicsAdapter,RegistryValueKind.String);
                 key.SetValue("UseGpu",p.Gpu ? 1 : 0,RegistryValueKind.DWord);
+                key.SetValue("VoiceVariation",p.VoiceVariation,RegistryValueKind.DWord);
                 key.SetValue("PauseLength",p.PauseLength,RegistryValueKind.DWord);
             }
         }
@@ -168,6 +174,43 @@ namespace PhononSapi {
         }
     }
 
+    internal sealed class GraphicsChoice {
+        internal readonly string Id, Name;
+        internal GraphicsChoice(string id,string name) {Id=id;Name=name;}
+        public override string ToString() {return Name;}
+        internal static bool ValidId(string id) {
+            return id!=null && id.Length==32 && id.All(ch=>(ch>='0' && ch<='9') || (ch>='a' && ch<='f'));
+        }
+        internal static GraphicsChoice[] Parse(string text) {
+            var choices=new Dictionary<string,GraphicsChoice>(StringComparer.Ordinal);
+            foreach(string row in text.Split('\n').Take(64)) {
+                int tab=row.IndexOf('\t');
+                if(tab!=32 || row.Length>289)continue;
+                var id=row.Substring(0,tab);var name=row.Substring(tab+1).Trim();
+                if(ValidId(id) && name.Length>0 && !name.Any(Char.IsControl) && !choices.ContainsKey(id))
+                    choices.Add(id,new GraphicsChoice(id,name));
+            }
+            return choices.Values.OrderBy(x=>x.Name,StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(x=>x.Id,StringComparer.Ordinal).ToArray();
+        }
+        internal static GraphicsChoice[] Discover() {
+            try {
+                using(var helper=Process.Start(new ProcessStartInfo(Path.Combine(App.Folder,"PhononHost.exe"),"--graphics-adapters"){
+                    UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,StandardOutputEncoding=Encoding.UTF8
+                })) {
+                    var output=helper.StandardOutput.ReadToEndAsync();
+                    if(!helper.WaitForExit(5000)) {
+                        try {helper.Kill();}catch(InvalidOperationException){}
+                        helper.WaitForExit(1000);
+                        return new GraphicsChoice[0];
+                    }
+                    if(helper.ExitCode==0 && output.Wait(1000))return Parse(output.Result);
+                }
+            } catch(Exception error){App.Log("Could not list graphics adapters: "+error.Message);}
+            return new GraphicsChoice[0];
+        }
+    }
+
     internal static class BackendStatus {
         internal static string Describe(int[] states,bool requestedGpu,bool unknownActive) {
             var names=states.Distinct().OrderBy(x=>x).Select(x=>x==1?"Initializing":x==2?"GPU (Vulkan)":x==3?"CPU (GPU disabled)":x==4?"CPU fallback (GPU initialization unavailable)":x==5?"Initialization failed":"Unknown backend").ToArray();
@@ -177,7 +220,7 @@ namespace PhononSapi {
             return text;
         }
         internal static string Current(bool requestedGpu) {
-            var states=new List<int>();bool unknown=false;
+            var states=new List<int>();var adapters=new SortedSet<string>(StringComparer.CurrentCultureIgnoreCase);bool unknown=false;
             foreach(var process in Process.GetProcessesByName("PhononHost").Take(64))using(process) {
                 try {
                     string path=process.MainModule.FileName;
@@ -186,14 +229,25 @@ namespace PhononSapi {
                     try {
                         using(var mapping=MemoryMappedFile.OpenExisting("Local\\PhononSAPI.Backend."+process.Id,MemoryMappedFileRights.Read))
                         using(var view=mapping.CreateViewAccessor(0,24,MemoryMappedFileAccess.Read)) {
-                            if(view.ReadUInt32(0)!=0x42534850 || view.ReadUInt32(4)!=1 ||
+                            uint version=view.ReadUInt32(4);
+                            if(view.ReadUInt32(0)!=0x42534850 || (version!=1 && version!=2) ||
                                view.ReadUInt64(8)!=(ulong)process.StartTime.ToUniversalTime().ToFileTimeUtc() || view.ReadUInt32(20)!=0){unknown=true;continue;}
                             int state=view.ReadInt32(16);if(state<1 || state>5){unknown=true;continue;}states.Add(state);
+                            if(version==2 && state==2)using(var nameView=mapping.CreateViewAccessor(24,256,MemoryMappedFileAccess.Read)) {
+                                var name=new StringBuilder();
+                                for(int index=0;index<128;index++){
+                                    char ch=(char)nameView.ReadUInt16(index*2);
+                                    if(ch=='\0')break;
+                                    if(!Char.IsControl(ch))name.Append(ch);
+                                }
+                                if(name.Length>0)adapters.Add(name.ToString());
+                            }
                         }
                     }catch(FileNotFoundException){unknown=true;}
                 }catch(InvalidOperationException){}catch(System.ComponentModel.Win32Exception){}catch(UnauthorizedAccessException){unknown=true;}catch(IOException){unknown=true;}
             }
-            return Describe(states.ToArray(),requestedGpu,unknown);
+            string status=Describe(states.ToArray(),requestedGpu,unknown);
+            return adapters.Count==0?status:status.Replace("GPU (Vulkan)","GPU (Vulkan): "+String.Join(", ",adapters));
         }
     }
 
@@ -390,7 +444,9 @@ namespace PhononSapi {
         readonly NumericUpDown pitch=new NumericUpDown {Minimum=0,Maximum=100,Increment=5};
         readonly NumericUpDown volume=new NumericUpDown {Minimum=0,Maximum=100,Value=100};
         readonly ComboBox pauseLength=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList};
+        readonly ComboBox voiceVariation=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList};
         readonly CheckBox gpu=new CheckBox {Text="Use &GPU acceleration",AutoSize=true};
+        readonly ComboBox graphicsAdapter=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList,Enabled=false};
         readonly ComboBox interval=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList};
         readonly Label status=new Label {AutoSize=true,Text="Ready",AccessibleName="Activity"};
         readonly TextBox backend=new TextBox {ReadOnly=true,Multiline=true,Height=45};
@@ -420,10 +476,17 @@ namespace PhononSapi {
             Add(layout,"Pa&use length:",pauseLength);
             pauseLength.Items.AddRange(new object[]{"Default","Shorter","Longer"});
             pauseLength.SelectedIndex=preferences.PauseLength;
+            Add(layout,"Voic&e variation:",voiceVariation);
+            voiceVariation.Items.AddRange(new object[]{"Default","Less","More"});
+            voiceVariation.SelectedIndex=preferences.VoiceVariation;
             rate.Value=preferences.Rate;
             pitch.Value=preferences.Pitch;
             volume.Value=Math.Max(0,Math.Min(100,preferences.Volume));
             gpu.Checked=preferences.Gpu; Add(layout,"",gpu);
+            Add(layout,"Graphics ada&pter:",graphicsAdapter);
+            graphicsAdapter.Items.Add(new GraphicsChoice("","Automatic"));
+            if(preferences.GraphicsAdapter.Length>0)graphicsAdapter.Items.Add(new GraphicsChoice(preferences.GraphicsAdapter,"Saved adapter (unavailable)"));
+            graphicsAdapter.SelectedIndex=graphicsAdapter.Items.Count-1;
             Add(layout,"Status (&backend and voices):",backend);
             backend.AccessibleName="Status";
             var buttons=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Fill};
@@ -445,9 +508,12 @@ namespace PhononSapi {
             text.TextChanged+=(s,e)=>{if(!synchronizingPreview)preview.Edit(text.Text);};
             resetSample.Click+=(s,e)=>{Stop();preview.Reset(PreviewLocale());UpdatePreview();};
             languages.SelectedIndexChanged+=(s,e)=>{if(!refreshingVoices)RefreshVoices();}; languages.SelectedIndex=0;
-            gpu.CheckedChanged+=(s,e)=>Save(); interval.SelectedIndexChanged+=(s,e)=>Save();
+            gpu.CheckedChanged+=(s,e)=>{graphicsAdapter.Enabled=gpu.Checked && graphicsAdapter.Items.Count>1;Save();};
+            interval.SelectedIndexChanged+=(s,e)=>Save();
             rate.ValueChanged+=(s,e)=>Save(); pitch.ValueChanged+=(s,e)=>Save(); volume.ValueChanged+=(s,e)=>Save();
             pauseLength.SelectedIndexChanged+=(s,e)=>Save();
+            voiceVariation.SelectedIndexChanged+=(s,e)=>Save();
+            graphicsAdapter.SelectionChangeCommitted+=(s,e)=>Save();
             voices.SelectedIndexChanged+=(s,e)=>{if(!refreshingVoices)VoiceChanged();};
             playOnVoiceChange.CheckedChanged+=(s,e)=>Save();
             voiceChangesEnabled=true;
@@ -459,6 +525,23 @@ namespace PhononSapi {
             check.Click+=async(s,e)=>await Check(true);
             timer.Tick+=async(s,e)=>await Check(false); Shown+=async(s,e)=>{timer.Start();backendTimer.Start();RefreshBackend();ShowStartupUpdateNotice();await Check(false);};
             backendTimer.Tick+=(s,e)=>RefreshBackend();
+            Shown+=async(s,e)=>{
+                var found=await Task.Run(()=>GraphicsChoice.Discover());
+                if(IsDisposed || closing.IsCancellationRequested)return;
+                graphicsAdapter.BeginUpdate();
+                try {
+                    string savedId=preferences.GraphicsAdapter;
+                    if(graphicsAdapter.Items.Count>1)graphicsAdapter.Items.RemoveAt(1);
+                    graphicsAdapter.Items.AddRange(found);
+                    var savedAdapter=found.FirstOrDefault(item=>item.Id==savedId);
+                    if(savedAdapter==null && savedId.Length>0) {
+                        savedAdapter=new GraphicsChoice(savedId,"Saved adapter (unavailable)");
+                        graphicsAdapter.Items.Add(savedAdapter);
+                    }
+                    graphicsAdapter.SelectedIndex=savedAdapter==null?0:graphicsAdapter.Items.IndexOf(savedAdapter);
+                    graphicsAdapter.Enabled=gpu.Checked && graphicsAdapter.Items.Count>1;
+                } finally {graphicsAdapter.EndUpdate();}
+            };
             FormClosing+=(s,e)=>{closing.Cancel();timer.Stop();backendTimer.Stop();ReleaseSpeech();Save();if(diagnosticsWindow!=null)diagnosticsWindow.Close();};
             FormClosed+=(s,e)=>{timer.Dispose();backendTimer.Dispose();closing.Dispose();};
         }
@@ -562,6 +645,9 @@ namespace PhononSapi {
             preferences.Gpu=gpu.Checked; preferences.Interval=new[]{"never","hourly","daily"}[Math.Max(0,interval.SelectedIndex)];
             preferences.Rate=(int)rate.Value;preferences.Pitch=(int)pitch.Value;preferences.Volume=(int)volume.Value;
             preferences.PauseLength=Math.Max(0,pauseLength.SelectedIndex);
+            preferences.VoiceVariation=Math.Max(0,voiceVariation.SelectedIndex);
+            var adapter=graphicsAdapter.SelectedItem as GraphicsChoice;
+            if(adapter!=null)preferences.GraphicsAdapter=adapter.Id;
             preferences.PlayOnVoiceChange=playOnVoiceChange.Checked;
             var selected=voices.SelectedItem as Voice; if(selected!=null) preferences.Voice=selected.id;
             try {App.Save(preferences);} catch(Exception error) {App.Log(error.Message);}

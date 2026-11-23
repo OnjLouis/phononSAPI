@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 #include "SapiImportEnumerator.h"
+#include "graphics.h"
 
 using namespace phonon;
 static const CLSID EngineId = {0x5261ca16,0x3c40,0x4ad8,{0x8e,0xc6,0x4d,0x46,0x50,0x48,0x53,0x41}};
@@ -24,6 +25,7 @@ public:
     Handle cancel;
     bool aborted = false;
     bool gpu = true;
+    std::wstring adapter;
     ~Child() { stop(); }
     bool running() const { return process.value && WaitForSingleObject(process, 0) == WAIT_TIMEOUT; }
     void stop() {
@@ -152,11 +154,12 @@ class Engine final : public ISpTTSEngine, public ISpObjectWithToken {
         return S_OK;
     }
     HRESULT request(const std::wstring& text, const SPVSTATE& state, ISpTTSEngineSite* site, ULONGLONG& offset) {
-        DWORD gpu = 1, size = sizeof(gpu);
-        RegGetValueW(HKEY_CURRENT_USER,L"Software\\Onj\\PhononSAPI",L"UseGpu",RRF_RT_REG_DWORD,nullptr,&gpu,&size);
+        const bool gpu = setting(L"UseGpu", 1) != 0;
+        const auto adapter = gpu ? selectedAdapter() : std::wstring{};
         if (!child) child = acquireChild();
-        if (child->running() && child->gpu != (gpu != 0)) child->stop();
-        child->gpu = gpu != 0;
+        if (child->running() && (child->gpu != gpu || child->adapter != adapter)) child->stop();
+        child->gpu = gpu;
+        child->adapter = adapter;
         if (!child->running() && !child->start(directory(module))) return HRESULT_FROM_WIN32(ERROR_PROCESS_ABORTED);
         Request request;
         auto input = utf8(text), speaker = utf8(voice), locale = utf8(language);
@@ -173,7 +176,7 @@ class Engine final : public ISpTTSEngine, public ISpObjectWithToken {
             : 2.f * std::pow(MaxSpeed / 2.f, std::min(1.f, (steps - doubleSpeedStep) / doubleSpeedStep));
         request.pitch = std::clamp(std::pow(2.f, state.PitchAdj.MiddleAdj / 12.f), .5f, 2.f);
         request.volume = std::clamp(state.Volume / 100.f,0.f,1.f);
-        request.gpu = gpu != 0;
+        request.gpu = gpu;
         if (!valid(request) || !child->send(request,input,speaker,locale)) { child->stop(); return E_FAIL; }
         bool failed = false;
         while (true) {

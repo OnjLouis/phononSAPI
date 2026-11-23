@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "protocol.h"
 #include "backend.h"
+#include "graphics.h"
 #include "sonic.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <type_traits>
 #include <memory>
 #include <vector>
 #include "SapiImportedVoice.h"
@@ -36,11 +38,16 @@ static void log(const std::string& message) noexcept {
 }
 struct Result { uint32_t frames; size_t samples; double firstMs; double totalMs; };
 using Callback = bool (*)(const float*, size_t, void*);
+using AdapterCallback = void (*)(const uint8_t*, const char*, void*);
 struct Native {
     BackendPublisher* status = nullptr;
     HMODULE library = nullptr;
     void* engine = nullptr;
     void* (*create)(const char*, uint32_t, const char*);
+    void* (*createVulkan)(const char*, const char*, const uint8_t*);
+    bool (*adapters)(AdapterCallback, void*);
+    const char* (*gpuName)(const void*);
+    bool (*temperature)(void*, float);
     bool (*speak)(void*, const char*, Callback, void*, Result*);
     bool (*voice)(void*, const char*);
     bool (*language)(void*, const char*);
@@ -61,6 +68,8 @@ struct Native {
             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         if (!library) throw std::runtime_error("Cannot load Phonon runtime");
         symbol(create,"ptts_new"); symbol(speak,"ptts_speak"); symbol(voice,"ptts_set_voice");
+        symbol(createVulkan,"ptts_new_vulkan"); symbol(adapters,"ptts_vulkan_adapters");
+        symbol(gpuName,"ptts_vulkan_name"); symbol(temperature,"ptts_set_temperature");
         symbol(importVoice,"ptts_set_imported_voice");
         symbol(language,"ptts_set_language"); symbol(free,"ptts_free"); symbol(error,"ptts_last_error");
     }
@@ -79,14 +88,18 @@ struct Native {
         if (gpu) {
             HMODULE vulkan = LoadLibraryExW(L"vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (vulkan) {
-                engine = create(model.c_str(), 3, "en");
+                const auto id = selectedAdapter();
+                const auto bytes = id.empty() ? AdapterId{} : decodeAdapter(id);
+                engine = createVulkan(model.c_str(), "en", id.empty() ? nullptr : bytes.data());
                 Result result{};
                 size_t samples = 0;
                 auto discard = [](const float*, size_t n, void* user) -> bool {
                     *static_cast<size_t*>(user) += n; return true;
                 };
-                if (engine && (!speak(engine, "A", discard, &samples, &result) || !samples)) {
-                    free(engine); engine = nullptr;
+                if (!engine || !speak(engine, "A", discard, &samples, &result) || !samples) {
+                    const char* reason = error(engine);
+                    if (reason && *reason) log(std::string("Vulkan initialization: ") + reason);
+                    if (engine) { free(engine); engine = nullptr; }
                 }
                 FreeLibrary(vulkan);
             }
@@ -94,8 +107,10 @@ struct Native {
         bool accelerated = engine != nullptr;
         if (!engine) engine = create(model.c_str(), 0, "en");
         if (!engine) throw std::runtime_error("Cannot initialize the bundled model");
-        if (status) status->set(accelerated ? Backend::Vulkan : (gpu ? Backend::CpuFallback : Backend::Cpu));
-        log(accelerated ? "Initialized Vulkan synthesis" : (gpu ? "GPU unavailable; initialized CPU fallback" : "Initialized CPU synthesis"));
+        const char* name = accelerated ? gpuName(engine) : nullptr;
+        if (status) status->set(accelerated ? Backend::Vulkan : (gpu ? Backend::CpuFallback : Backend::Cpu), name);
+        log(name && *name ? std::string("Initialized Vulkan synthesis: ") + name :
+            accelerated ? "Initialized Vulkan synthesis" : (gpu ? "GPU unavailable; initialized CPU fallback" : "Initialized CPU synthesis"));
     }
 };
 struct Sink {
@@ -150,6 +165,33 @@ struct Sink {
     }
 };
 
+static int listAdapters() {
+    HMODULE vulkan = LoadLibraryExW(L"vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!vulkan) return 0;
+    std::unique_ptr<std::remove_pointer_t<HMODULE>, decltype(&FreeLibrary)> owner(vulkan, FreeLibrary);
+    Native native;
+    native.load();
+    struct Output { HANDLE pipe; unsigned count = 0; bool failed = false; } output{GetStdHandle(STD_OUTPUT_HANDLE)};
+    auto visit = [](const uint8_t* id, const char* name, void* opaque) {
+        auto& out = *static_cast<Output*>(opaque);
+        if (!id || !name || !*name || out.failed || out.count >= 64) return;
+        constexpr char Hex[] = "0123456789abcdef";
+        char row[32 + 1 + 256 + 1];
+        size_t length = 0;
+        for (size_t i = 0; i < AdapterId{}.size(); ++i) {
+            row[length++] = Hex[id[i] >> 4];
+            row[length++] = Hex[id[i] & 15];
+        }
+        row[length++] = '\t';
+        for (size_t i = 0; i < 255 && name[i]; ++i)
+            row[length++] = static_cast<unsigned char>(name[i]) < 32 ? ' ' : name[i];
+        row[length++] = '\n';
+        ++out.count;
+        out.failed = !writeExact(out.pipe, row, length);
+    };
+    return native.adapters(visit, &output) && !output.failed ? 0 : 3;
+}
+
 static int preview() {
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE), output = GetStdHandle(STD_OUTPUT_HANDLE);
     uint32_t count{};
@@ -165,7 +207,7 @@ static int preview() {
     native.load();
     native.open(false);
     if (!native.importVoice(native.engine, bytes.data(), bytes.size()) ||
-        !native.language(native.engine, lang)) return 3;
+        !native.language(native.engine, lang) || !native.temperature(native.engine, voiceTemperature())) return 3;
     struct Audio { HANDLE output; size_t frames = 0; } audio{output};
     auto sink = [](const float* pcm, size_t size, void* user) -> bool {
         auto& audio = *static_cast<Audio*>(user);
@@ -182,6 +224,10 @@ static int preview() {
 
 int wmain(int argc, wchar_t** argv) {
     if (argc != 2) return 2;
+    if (std::wstring(argv[1]) == L"--graphics-adapters") {
+        try { return listAdapters(); }
+        catch (...) { return 3; }
+    }
     if (std::wstring(argv[1]) == L"--preview") {
         try { return preview(); }
         catch (...) { return 3; }
@@ -210,16 +256,16 @@ int wmain(int argc, wchar_t** argv) {
                 if (!native.engine) native.open(request.gpu != 0);
                 if (!native.selectVoice(voice) || !native.language(native.engine, language.c_str()))
                     throw std::runtime_error("The requested voice or language is unavailable");
+                if (!native.temperature(native.engine, voiceTemperature()))
+                    throw std::runtime_error("Cannot set voice variation");
                 auto stream = sonicCreateStream(SampleRate, 1);
                 if (!stream) throw std::bad_alloc();
                 std::unique_ptr<sonicStreamStruct, decltype(&sonicDestroyStream)> owner(stream, sonicDestroyStream);
                 sonicSetSpeed(stream, request.speed); sonicSetPitch(stream, request.pitch);
                 sonicSetVolume(stream, request.volume);
                 Sink sink{output, cancel, stream};
-                DWORD pause = 0, size = sizeof(pause);
-                if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Onj\\PhononSAPI", L"PauseLength",
-                        RRF_RT_REG_DWORD, nullptr, &pause, &size) == ERROR_SUCCESS &&
-                    (pause == PAUSE_SHORTER || pause == PAUSE_LONGER) && request.volume != 0) {
+                DWORD pause = setting(L"PauseLength");
+                if ((pause == PAUSE_SHORTER || pause == PAUSE_LONGER) && request.volume != 0) {
                     sink.pauses.mode = static_cast<PauseMode>(pause);
                 }
                 Result result{};
